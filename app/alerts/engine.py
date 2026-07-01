@@ -102,18 +102,6 @@ class AlertEngine:
             alert_type="loc_prompt",
         ))
 
-    def ocr_hint(self, item_name: str):
-        self._emit(Alert(
-            title=item_name or "Item Capture",
-            body="Couldn't read stats from that screenshot.\n"
-                 "Press  Win + Shift + S  and crop just the item\n"
-                 "inspect window, then release to retry.",
-            color=theme.ALERT_RESEARCHING,
-            badge="Tip",
-            alert_type="ocr_hint",
-            item_name=item_name,
-        ))
-
     def inventory_prompt(self):
         self._emit(Alert(
             title="Help map item IDs",

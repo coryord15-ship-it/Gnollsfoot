@@ -1,12 +1,5 @@
 customtkinter>=5.2.2
 pygame==2.6.1
-# Windows built-in OCR (Windows 10/11) — no external binary needed
-winrt-runtime>=1.0.0
-winrt.windows.media.ocr>=1.0.0
-winrt.windows.graphics.imaging>=1.0.0
-winrt.windows.storage.streams>=1.0.0
-# pytesseract is an optional fallback if winrt packages are unavailable
-pytesseract>=0.3.10
 Pillow>=10.0.0
 pystray>=0.19.5
 watchdog>=3.0.0

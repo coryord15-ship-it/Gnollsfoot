@@ -8,9 +8,7 @@ import logging
 import os
 import sys
 import threading
-import webbrowser
 from typing import Optional
-from urllib.parse import quote as _url_quote
 
 import customtkinter as ctk
 from PIL import Image
@@ -290,23 +288,6 @@ class MainWindow(ctk.CTk):
             font=theme.FONT_BODY_SMALL, text_color=alert.color, anchor="e",
         )
         badge_label.pack(side="right")
-
-        # Submit Screenshot removed — OCR/screenshot capture deprecated
-        if False:
-            _p = [f"item={_url_quote(alert.item_name)}"]
-            if getattr(alert, "npc_name", ""):
-                _p.append(f"mob={_url_quote(alert.npc_name)}")
-            _generic = ("No info yet", "Researching", "Community-verified", "Item looted")
-            if alert.body and not any(g in alert.body for g in _generic):
-                _p.append(f"notes={_url_quote(alert.body[:300])}")
-            url = "https://gnollguard.com/submit?" + "&".join(_p)
-            ctk.CTkButton(
-                title_row, text="📤  Submit Screenshot", width=140,
-                fg_color="transparent", text_color=alert.color,
-                hover_color=theme.PANEL_HOVER, font=theme.FONT_BODY_SMALL,
-                border_width=1, border_color=alert.color,
-                command=lambda u=url: webbrowser.open(u),
-            ).pack(side="right", padx=(0, theme.PAD_SM))
 
         ctk.CTkLabel(
             inner, text=alert.body,

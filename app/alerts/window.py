@@ -8,10 +8,8 @@ standard tk widgets avoids this entirely and is guaranteed to work.
 
 import logging
 import threading
-import webbrowser
 from queue import Empty, Queue
 from typing import Optional
-from urllib.parse import quote as _url_quote
 import tkinter as tk
 
 import customtkinter as ctk   # kept only for type-compatibility with start()
@@ -52,12 +50,10 @@ _FONT_CLOSE  = ("Segoe UI",   13, "bold")
 class AlertWindow:
     def __init__(self, config: dict, supabase=None,
                  on_position_save: Optional[callable] = None,
-                 on_submit_screenshot: Optional[callable] = None,
                  is_admin: Optional[callable] = None):
         self._config               = config
         self._supabase             = supabase
         self._on_position_save     = on_position_save
-        self._on_submit_screenshot = on_submit_screenshot
         self._is_admin             = is_admin
         self._duration        = config.get("alert_duration_seconds", 15)
         self._queue: Queue[Alert] = Queue()
@@ -151,70 +147,6 @@ class AlertWindow:
             font=_FONT_BODY, anchor="nw", justify="left",
             wraplength=W - PAD * 2,
         ).place(x=PAD, y=68, width=W - PAD * 2, height=56)
-
-        # Submit Screenshot area removed — OCR/screenshot capture deprecated
-        if False:
-            _params = [f"item={_url_quote(alert.item_name)}"]
-            if getattr(alert, "npc_name", ""):
-                _params.append(f"mob={_url_quote(alert.npc_name)}")
-            _generic = ("No info yet", "Researching", "Community-verified", "Item looted")
-            if alert.body and not any(g in alert.body for g in _generic):
-                _params.append(f"notes={_url_quote(alert.body[:300])}")
-            _fallback_url = "https://gnollguard.com/submit?" + "&".join(_params)
-
-            # Container frame so we can swap content after clicking
-            sub_frame = tk.Frame(win, bg=_BG)
-            sub_frame.place(x=PAD, y=126, width=W - PAD * 2, height=54)
-
-            def _show_capture_ui(frame=sub_frame, a=alert, fb=_fallback_url):
-                for w in frame.winfo_children():
-                    w.destroy()
-                # Cancel auto-dismiss so popup stays open
-                if self._dismiss_timer:
-                    try: win.after_cancel(self._dismiss_timer)
-                    except Exception: pass
-                    self._dismiss_timer = None
-
-                inst = tk.Label(frame,
-                    text="Open item inspect in EQ, then click Capture:",
-                    bg=_BG, fg=_GOLD, font=_FONT_SMALL, anchor="w")
-                inst.pack(fill="x")
-
-                btn_row = tk.Frame(frame, bg=_BG)
-                btn_row.pack(fill="x", pady=(3, 0))
-
-                def _countdown(lbl, remaining, a=a):
-                    if remaining > 0:
-                        lbl.config(text=f"📸 Capturing in {remaining}s…")
-                        win.after(1000, lambda: _countdown(lbl, remaining - 1, a))
-                    else:
-                        lbl.config(text="📸 Capturing…")
-                        if self._on_submit_screenshot:
-                            self._on_submit_screenshot(a)
-
-                cap_btn = tk.Button(btn_row, text="📸 Capture Screen",
-                    bg=_BG, fg=_GOLD, font=_FONT_SMALL,
-                    bd=1, relief="solid", cursor="hand2",
-                    activebackground=_HOVER, activeforeground=_GOLD)
-                cap_btn.pack(side="left", padx=(0, 6))
-                cap_btn.config(command=lambda b=cap_btn: (
-                    b.config(state="disabled"),
-                    _countdown(b, 3)
-                ))
-
-                tk.Button(btn_row, text="🌐 Submit on Website",
-                    bg=_BG, fg=_SEC, font=_FONT_SMALL,
-                    bd=0, relief="flat", cursor="hand2",
-                    activebackground=_HOVER, activeforeground=_PRI,
-                    command=lambda u=fb: webbrowser.open(u),
-                ).pack(side="left")
-
-            tk.Button(sub_frame, text="📤  Submit Screenshot",
-                bg=_BG, fg=color, font=_FONT_SMALL,
-                bd=1, relief="solid", cursor="hand2",
-                activebackground=_HOVER, activeforeground=color,
-                command=_show_capture_ui,
-            ).place(x=0, y=14, width=W - PAD * 2, height=24)
 
         # Thin divider + item extras
         if alert.alert_type == "item":

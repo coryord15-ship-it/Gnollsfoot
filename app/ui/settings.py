@@ -153,16 +153,12 @@ class SettingsTab(ctk.CTkFrame):
             value=self._app.config.get("export_directory", "")
         )
 
-        # Clipboard OCR (auto item capture) is deprecated — its settings section is
-        # hidden from players. Keep the var so saved settings stay consistent.
-        self._ocr_var = ctk.BooleanVar(value=self._app.config.get("clipboard_ocr_enabled", False))
-
         self._section(scroll, "Community")
         ctk.CTkLabel(
             scroll,
             text="Verifications are saved locally on your machine only. "
-                 "Use the 'Submit Screenshot' button on any alert to share "
-                 "an item with the community database.",
+                 "Looted items are shared with the community database "
+                 "automatically in the background.",
             font=theme.FONT_BODY, text_color=theme.TEXT_MUTED, anchor="w",
             wraplength=700, justify="left",
         ).pack(anchor="w", pady=(0, theme.PAD_SM))
@@ -346,7 +342,6 @@ class SettingsTab(ctk.CTkFrame):
         self._app.config["audio_enabled"] = self._audio_var.get()
         self._app.config["audio_volume"] = self._volume_var.get()
         self._app.config["export_directory"] = self._export_dir_var.get()
-        self._app.config["clipboard_ocr_enabled"] = self._ocr_var.get()
         if self._supa_url_var.get().strip():
             self._app.config["supabase_url"] = self._supa_url_var.get().strip()
         if self._supa_key_var.get().strip():

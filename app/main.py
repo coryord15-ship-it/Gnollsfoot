@@ -36,10 +36,8 @@ from app.db.queries import (
     upsert_item, upsert_npc, add_dialogue, set_npc_location, verify_item,
     log_vendor_price,
 )
-from app.clipboard_watcher import ClipboardWatcher
 from app.log_watcher import LogWatcher
 from app.log_rotate import LogRotator
-from app.parsers.item_ocr import ocr_image, parse_item_text
 from app.parsers.npc_parser import extract_item_hints
 from app.updater import UpdateChecker
 from app.sync.auth import AuthManager
@@ -256,7 +254,6 @@ class AppState:
         self.main_window: MainWindow = None
         self.alert_window: AlertWindow = None
         self.overlay_window = None
-        self.clipboard_watcher: ClipboardWatcher = None
 
         self._last_npc_id: int = None
 
@@ -426,7 +423,7 @@ def _on_auto_sold(app: AppState, evt):
 
 def _on_zone(app: AppState, zone: str):
     """Player entered a new zone — update the overlay's 'Quests in Zone' tab and
-    remember the zone for OCR submissions + auto-sold drop tagging."""
+    remember the zone for auto-sold drop tagging."""
     app._current_zone = zone
     if app.alert_window is not None:
         app.alert_window.last_zone = zone
@@ -690,44 +687,6 @@ def main():
     win = MainWindow(app)
     app.main_window = win
 
-    def _arm_submit_ocr(alert):
-        """
-        Called after the countdown in the popup completes.
-        Grabs the full screen, runs OCR to pull item stats, then opens the
-        submit website with everything pre-filled — no clipboard needed.
-        """
-        def _do():
-            import webbrowser
-            from urllib.parse import quote as _q
-            try:
-                from PIL import ImageGrab
-                img = ImageGrab.grab()
-            except Exception as e:
-                log.warning("Screen capture failed: %s", e)
-                img = None
-
-            text     = ocr_image(img) if img else None
-            ocr_item = parse_item_text(text or "", fallback_name=alert.item_name) if text else None
-
-            npc  = getattr(alert, "npc_name", "") or ""
-            zone = (app.alert_window.last_zone or "") if app.alert_window else ""
-
-            params = [f"item={_q(alert.item_name)}"]
-            if npc:
-                params.append(f"mob={_q(npc)}")
-            if zone:
-                params.append(f"zone={_q(zone)}")
-            if ocr_item:
-                desc = ocr_item.to_description()
-                if desc:
-                    params.append(f"notes={_q(desc[:400])}")
-
-            url = "https://gnollguard.com/submit?" + "&".join(params)
-            log.info("OCR submit: opening browser for '%s' — %s", alert.item_name, url)
-            webbrowser.open(url)
-
-        threading.Thread(target=_do, daemon=True).start()
-
     alert_win = AlertWindow(
         app.config,
         supabase=app.supabase,
@@ -735,7 +694,6 @@ def main():
             app.config.setdefault("window", {}).update({"alert_x": x, "alert_y": y}),
             _save_config(app.config),
         ),
-        on_submit_screenshot=_arm_submit_ocr,
         is_admin=lambda: app.auth.is_admin,
     )
     app.alert_window = alert_win
@@ -842,63 +800,6 @@ def main():
 
     # Start alert window polling loop
     alert_win.start(win)
-
-    # Clipboard OCR — fires when user presses Alt+Print Screen over an EQ item window
-    def _on_clipboard_image(img):
-        if not app.config.get("clipboard_ocr_enabled", True):
-            return
-
-        text = ocr_image(img)
-        if not text:
-            return
-        # Try to match against a recently looted item name as a hint
-        recent_name = ""
-        try:
-            from sqlalchemy import text as sql_text
-            row = app.db_session.execute(
-                sql_text("SELECT item_name FROM loot_events ORDER BY real_timestamp DESC LIMIT 1")
-            ).fetchone()
-            if row:
-                recent_name = row[0]
-        except Exception:
-            pass
-        ocr_item = parse_item_text(text, fallback_name=recent_name)
-        if not ocr_item or not ocr_item.item_name:
-            # Only prompt if the player recently looted something — they're
-            # probably trying to capture stats but got a bad crop.
-            if recent_name:
-                win.after(0, lambda n=recent_name: app.alert_engine.ocr_hint(n))
-            else:
-                log.debug("Clipboard image not recognized as EQ item window")
-            return
-        desc = ocr_item.to_description()
-        log.info("Clipboard OCR captured: %s", ocr_item.item_name)
-        def _save_and_alert():
-            upsert_item(app.db_session, {
-                "name": ocr_item.item_name,
-                "item_level": 0,
-                "description": desc,
-                "slot": ocr_item.slot,
-                "verified": True,
-            })
-            # Community item authoring is admin-only; non-admins still get the
-            # local verified alert, just no community push.
-            if app.auth.is_admin:
-                threading.Thread(
-                    target=lambda: app.supabase.contribute_item(
-                        app.db_session.query(__import__("app.db.models", fromlist=["Item"]).Item)
-                        .filter_by(name=ocr_item.item_name).first()
-                    ),
-                    daemon=True,
-                ).start()
-            win.after(0, lambda: app.alert_engine.item_verified(
-                ocr_item.item_name, desc or "Stats captured from item inspect window."
-            ))
-        threading.Thread(target=_save_and_alert, daemon=True).start()
-
-    if app.config.get("clipboard_ocr_enabled", True):
-        app.clipboard_watcher = ClipboardWatcher(on_image=_on_clipboard_image)
-        app.clipboard_watcher.start()
 
     # Start log watcher
     def apply_log_path(path: str):
