@@ -28,7 +28,6 @@ if _PROJECT_ROOT not in sys.path:
 import customtkinter as ctk
 
 from app.alerts.engine import Alert, AlertEngine
-from app.alerts.window import AlertWindow
 from app import quest_progress
 from app.db.models import create_db_engine, make_session_factory
 from app.db.queries import (
@@ -250,7 +249,6 @@ class AppState:
 
         # UI refs — set after UI is built
         self.main_window: MainWindow = None
-        self.alert_window: AlertWindow = None
         self.overlay_window = None
 
     def save_config(self):
@@ -421,8 +419,6 @@ def _on_zone(app: AppState, zone: str):
     """Player entered a new zone — update the overlay's 'Quests in Zone' tab and
     remember the zone for auto-sold drop tagging."""
     app._current_zone = zone
-    if app.alert_window is not None:
-        app.alert_window.last_zone = zone
     ov = getattr(app, "overlay_window", None)
     win = app.main_window
     if ov is not None and win is not None:
@@ -590,17 +586,6 @@ def main():
     win = MainWindow(app)
     app.main_window = win
 
-    alert_win = AlertWindow(
-        app.config,
-        supabase=app.supabase,
-        on_position_save=lambda x, y: (
-            app.config.setdefault("window", {}).update({"alert_x": x, "alert_y": y}),
-            _save_config(app.config),
-        ),
-        is_admin=lambda: app.auth.is_admin,
-    )
-    app.alert_window = alert_win
-
     # Verify callback: marks item correct locally and pushes to community DB.
     def on_verify_item(item_name: str):
         def _do():
@@ -623,9 +608,8 @@ def main():
                 log.info("Marked '%s' as correct (local only)", item_name)
         threading.Thread(target=_do, daemon=True).start()
 
-    # Wire alert engine → floating window + history tab
+    # Wire alert engine → in-window activity feed (Recent Alerts tab). No popups.
     def on_alert(alert: Alert):
-        alert_win.push(alert)
         win.after(0, lambda a=alert: win.add_alert_row(a, on_verify=on_verify_item))
 
     app.alert_engine.add_listener(on_alert)
@@ -700,9 +684,6 @@ def main():
     # The periodic "Help map item IDs" reminder popup was removed (too distracting).
     # The silent harvest above (poll_inventory) still submits IDs whenever an
     # /outputfile inventory dump appears — no nag needed.
-
-    # Start alert window polling loop
-    alert_win.start(win)
 
     # Start log watcher
     def apply_log_path(path: str):

@@ -71,8 +71,8 @@ jobs:
             | **GnollGuard-Setup.exe** | ✅ Recommended — installs to your PC, adds Start Menu + Desktop shortcuts, includes uninstaller |
             | GnollGuard.exe | Portable — run from anywhere, no installation needed |
 
-            The app watches your EverQuest Legends log file, alerts you the moment you
-            loot something, looks the item up, and helps build the community database at
-            legendsgnollloot.com.
+            A Quest Journal + Item Database companion for EverQuest Legends. It reads
+            your game log to tick quest items off your journal as you loot and turn them
+            in, and silently helps build the community item database.
 
             **Requirements:** Windows 10 / 11 (64-bit). Nothing else to install.

@@ -43,7 +43,6 @@ a = Analysis(
         'app.parsers.loot_parser',
         'app.parsers.npc_parser',
         'app.alerts.engine',
-        'app.alerts.window',
         'app.sync.supabase',
         'app.sync.auth',
         'app.ui.main_window',
