@@ -91,6 +91,18 @@ class SettingsTab(ctk.CTkFrame):
             progress_color=theme.GOLD, button_color=theme.GOLD,
             command=self._toggle_overlay,
         ).pack(anchor="w", pady=(0, theme.PAD_SM))
+        self._overlay_clickthrough_var = ctk.BooleanVar(
+            value=self._app.config.get("overlay_click_through", True)
+        )
+        ctk.CTkSwitch(
+            scroll, text="Click-through (clicks pass to the game unless on text/buttons)",
+            variable=self._overlay_clickthrough_var,
+            text_color=theme.TEXT_PRIMARY, font=theme.FONT_BODY,
+            progress_color=theme.GOLD, button_color=theme.GOLD,
+            command=lambda: self._app.config.update(
+                {"overlay_click_through": bool(self._overlay_clickthrough_var.get())}
+            ),
+        ).pack(anchor="w", pady=(0, theme.PAD_SM))
         self._overlay_opacity_var = ctk.IntVar(
             value=int(float(self._app.config.get("overlay_opacity", 0.92)) * 100)
         )
@@ -337,6 +349,7 @@ class SettingsTab(ctk.CTkFrame):
         self._app.config["theme"] = "light" if self._theme_var.get() == "Light" else "default"
         self._app.config["overlay_enabled"] = bool(self._overlay_var.get())
         self._app.config["overlay_borderless"] = bool(self._overlay_borderless_var.get())
+        self._app.config["overlay_click_through"] = bool(self._overlay_clickthrough_var.get())
         self._app.config["overlay_opacity"] = round(self._overlay_opacity_var.get() / 100.0, 2)
         self._app.config["alert_duration_seconds"] = self._duration_var.get()
         self._app.config["audio_enabled"] = self._audio_var.get()
