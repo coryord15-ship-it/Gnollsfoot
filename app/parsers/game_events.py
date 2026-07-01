@@ -1,40 +1,15 @@
 """
-Silent background parsers for NPC encounters and vendor transactions.
-Nothing here fires alerts — all data goes straight to the DB.
+Silent background parsers for the two game-log events the app still cares about:
+  - Quest turn-ins  ("You have given <npc> <item>.")  → ticks quest completion
+  - Auto-sold loot  ("You looted a <item> from a <mob>'s corpse ...") → item/drop data
+
+Nothing here fires alerts on its own — the data feeds the Quest Journal and the
+Item Database. All patterns are configurable from settings.json.
 """
 
 import re
 from dataclasses import dataclass
 from typing import Optional
-
-
-@dataclass
-class NpcTargetEvent:
-    npc_name: str
-
-
-@dataclass
-class NpcSlainEvent:
-    npc_name: str
-
-
-@dataclass
-class VendorSellEvent:
-    """You sold an item TO a vendor."""
-    item_name: str
-    merchant_name: str
-    price_copper: int
-    price_raw: str
-
-
-@dataclass
-class VendorBuyEvent:
-    """You bought an item FROM a vendor."""
-    item_name: str
-    merchant_name: str
-    quantity: int
-    price_copper: int
-    price_raw: str
 
 
 @dataclass
@@ -48,8 +23,8 @@ class TurnInEvent:
 class AutoSoldEvent:
     """EQL auto-sold a looted item to the bag-vendor:
     'You looted a <item> from a <mob>'s corpse and sold it for <price>.'
-    A high community count of these = likely vendor trash. 'sold for free'
-    (price_copper == 0, sold_for_free) usually means a quest/no-vendor item."""
+    'sold for free' (sold_for_free) usually means a quest/no-vendor item, which is
+    a useful signal for the Item Database."""
     item_name: str        # full looted name, e.g. "Crushbone Belt +1"
     base_name: str        # tier stripped, e.g. "Crushbone Belt"
     tier: int             # the +N (0 if none)
@@ -77,7 +52,7 @@ def _to_copper(price_str: str) -> int:
     return total
 
 
-class CombatParser:
+class GameEventParser:
     def __init__(self, patterns: dict):
         self._reload(patterns)
 
@@ -88,22 +63,6 @@ class CombatParser:
         def _c(key, fallback):
             return re.compile(patterns.get(key, fallback), re.IGNORECASE)
 
-        self._npc_target = _c(
-            "npc_target",
-            r"Targeted \(NPC\): (?P<npc>.+)"
-        )
-        self._npc_slain = _c(
-            "npc_slain",
-            r"You have slain (?P<npc>.+?)!"
-        )
-        self._vendor_sell = _c(
-            "vendor_sell",
-            r"You receive (?P<price>.+?) from (?P<merchant>.+?) for the (?P<item>.+?)\(s\)\."
-        )
-        self._vendor_buy = _c(
-            "vendor_buy",
-            r"You purchased (?P<qty>\d+) (?P<item>.+?) from (?P<merchant>.+?) for\s+(?P<price>.+?)\."
-        )
         # Quest turn-in: 'You have given <npc> <item>.' / 'You give your <item> to <npc>.'
         # NOTE: EQL's exact turn-in log format is unconfirmed — this is configurable
         # in settings.json (log_patterns.quest_turn_in) and may need adjusting.
@@ -117,43 +76,6 @@ class CombatParser:
             "auto_sold",
             r"You looted (?:a |an |(?P<qty>\d+) )?(?P<item>.+?) from (?:a |an )?(?P<npc>.+?)'s corpse and sold it for (?P<price>.+?)\."
         )
-
-    def parse_npc_target(self, line: str) -> Optional[NpcTargetEvent]:
-        m = self._npc_target.search(line)
-        if m:
-            return NpcTargetEvent(npc_name=m.group("npc").strip())
-        return None
-
-    def parse_npc_slain(self, line: str) -> Optional[NpcSlainEvent]:
-        m = self._npc_slain.search(line)
-        if m:
-            return NpcSlainEvent(npc_name=m.group("npc").strip())
-        return None
-
-    def parse_vendor_sell(self, line: str) -> Optional[VendorSellEvent]:
-        m = self._vendor_sell.search(line)
-        if m:
-            price_raw = m.group("price").strip()
-            return VendorSellEvent(
-                item_name=m.group("item").strip(),
-                merchant_name=m.group("merchant").strip(),
-                price_copper=_to_copper(price_raw),
-                price_raw=price_raw,
-            )
-        return None
-
-    def parse_vendor_buy(self, line: str) -> Optional[VendorBuyEvent]:
-        m = self._vendor_buy.search(line)
-        if m:
-            price_raw = m.group("price").strip()
-            return VendorBuyEvent(
-                item_name=m.group("item").strip(),
-                merchant_name=m.group("merchant").strip(),
-                quantity=int(m.group("qty")),
-                price_copper=_to_copper(price_raw),
-                price_raw=price_raw,
-            )
-        return None
 
     def parse_turn_in(self, line: str) -> Optional[TurnInEvent]:
         m = self._turn_in.search(line)

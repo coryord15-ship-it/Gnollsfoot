@@ -17,9 +17,9 @@ class Alert:
     title: str
     body: str
     color: str
-    badge: str                     # 'Verified' | 'Unverified' | 'Researching...'
+    badge: str                     # 'Quest Item' | 'Quest Hint' | 'Turned In' ...
     source_url: str = ""
-    alert_type: str = "item"       # 'item' | 'quest' | 'research' | 'loc_prompt'
+    alert_type: str = "quest"      # 'quest'
     item_name: str = ""
     npc_name: str = ""             # mob that dropped the item, from log parser
 
@@ -40,30 +40,6 @@ class AlertEngine:
                 log.exception("Alert listener error")
 
     # ── Public fire methods ───────────────────────────────────────────────────
-
-    def item_verified(self, name: str, description: str, source_url: str = "", npc_name: str = ""):
-        self._emit(Alert(
-            title=name,
-            body=description or "Item looted.",
-            color=theme.ALERT_ITEM_VERIFIED,
-            badge="Verified",
-            source_url=source_url,
-            alert_type="item",
-            item_name=name,
-            npc_name=npc_name,
-        ))
-
-    def item_unverified(self, name: str, description: str = "", source_url: str = "", npc_name: str = ""):
-        self._emit(Alert(
-            title=name,
-            body=description or "Unknown item — press Alt+PrtScr to auto-capture stats.",
-            color=theme.ALERT_ITEM_UNVERIFIED,
-            badge="Unverified",
-            source_url=source_url,
-            alert_type="item",
-            item_name=name,
-            npc_name=npc_name,
-        ))
 
     def quest_hint(self, item_name: str, npc_name: str, hint: str, verified: bool):
         color = theme.ALERT_QUEST_VERIFIED if verified else theme.ALERT_QUEST_UNVERIFIED
@@ -91,26 +67,6 @@ class AlertEngine:
             alert_type="quest",
             item_name=item_name,
             npc_name=npc_name,
-        ))
-
-    def loc_prompt(self, npc_name: str):
-        self._emit(Alert(
-            title=f"New NPC: {npc_name}",
-            body="Type /loc and /who in game to help map this NPC.",
-            color=theme.ALERT_RESEARCHING,
-            badge="New NPC",
-            alert_type="loc_prompt",
-        ))
-
-    def inventory_prompt(self):
-        self._emit(Alert(
-            title="Help map item IDs",
-            body="Copied  /outputfile inventory  to your clipboard.\n"
-                 "Paste it in EQ (Ctrl+V) and press Enter to add your\n"
-                 "item IDs to the community database.",
-            color=theme.ALERT_RESEARCHING,
-            badge="Tip",
-            alert_type="inventory_prompt",
         ))
 
     def quest_item_turned_in(self, item_name: str, npc_name: str, complete: bool = False):

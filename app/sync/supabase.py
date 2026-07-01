@@ -167,43 +167,6 @@ class SupabaseSync:
             log.debug("Vote submission failed: %s", e)
             return False
 
-    def submit_vendor_price(
-        self,
-        item_name: str,
-        merchant_name: str,
-        transaction_type: str,
-        price_copper: int,
-        price_raw: str,
-        quantity: int = 1,
-    ) -> bool:
-        """
-        Push a single vendor transaction to the community vendor_prices table.
-        Rows are never upserted — each observation is an independent data point
-        so the community can compute MIN/MAX ranges across all players.
-        """
-        if not self._client:
-            return False
-        try:
-            import requests as _req
-            _req.post(
-                "https://gnollguard.com/api/vendor-price",
-                json={
-                    "item_name": item_name,
-                    "merchant_name": merchant_name,
-                    "transaction_type": transaction_type,
-                    "price_copper": price_copper,
-                    "price_raw": price_raw,
-                    "quantity": quantity,
-                },
-                headers=self._auth_headers(),
-                timeout=8,
-            )
-            log.debug("Vendor price submitted: %s %s @ %d copper", transaction_type, item_name, price_copper)
-            return True
-        except Exception as e:
-            log.debug("Vendor price submit failed: %s", e)
-            return False
-
     def submit_inventory(self, items: list) -> bool:
         """
         Push a batch of {name, id} identity pairs (from /outputfile inventory)
@@ -270,26 +233,6 @@ class SupabaseSync:
         except Exception as e:
             log.warning("remove_quest failed for %s: %s", quest_id, e)
             return False
-
-    def push_npc_dialogue(self, rows: list) -> int:
-        """Admin: push captured NPC dialogue to the community (verification store)."""
-        if not self._client or not self._auth_token or not rows:
-            return 0
-        try:
-            import requests as _req
-            resp = _req.post(
-                "https://gnollguard.com/api/npc-dialogue",
-                json={"lines": rows},
-                headers=self._auth_headers(),
-                timeout=20,
-            )
-            if resp.status_code == 200:
-                return resp.json().get("synced", 0) or 0
-            log.warning("push_npc_dialogue HTTP %s: %s", resp.status_code, resp.text[:200])
-            return 0
-        except Exception as e:
-            log.warning("push_npc_dialogue failed: %s", e)
-            return 0
 
     def ping(self) -> bool:
         """Quick connectivity check. Returns True if reachable."""

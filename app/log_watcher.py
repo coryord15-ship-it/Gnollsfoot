@@ -20,12 +20,8 @@ from watchdog.events import FileModifiedEvent, FileSystemEventHandler
 from watchdog.observers import Observer
 
 from app.parsers.loot_parser import LootParser, LootEvent as LootEvt
-from app.parsers.npc_parser import NPCParser, DialogueEvent, LocEvent, WhoEvent
-from app.parsers.combat_parser import (
-    CombatParser,
-    NpcTargetEvent, NpcSlainEvent, VendorSellEvent, VendorBuyEvent, TurnInEvent,
-    AutoSoldEvent,
-)
+from app.parsers.npc_parser import NPCParser, DialogueEvent
+from app.parsers.game_events import GameEventParser, TurnInEvent, AutoSoldEvent
 
 log = logging.getLogger(__name__)
 
@@ -46,7 +42,7 @@ class LogWatcher:
         )
         self._loot_parser = LootParser(patterns.get("loot_triggers", []))
         self._npc_parser = NPCParser(patterns)
-        self._combat_parser = CombatParser(patterns)
+        self._event_parser = GameEventParser(patterns)
         # EQL appends a difficulty suffix to zone names: "<Zone> <N> (<Label>)".
         # Capture the clean zone + the difficulty (0 Normal/2 Adaptive/3 Fused/4 Refined).
         self._zone_pattern = re.compile(
@@ -65,12 +61,6 @@ class LogWatcher:
         # Callbacks — registered by other modules
         self._on_loot: list[Callable[[LootEvt], None]] = []
         self._on_dialogue: list[Callable[[DialogueEvent], None]] = []
-        self._on_loc: list[Callable[[LocEvent], None]] = []
-        self._on_who: list[Callable[[WhoEvent], None]] = []
-        self._on_npc_target: list[Callable[[NpcTargetEvent], None]] = []
-        self._on_npc_slain: list[Callable[[NpcSlainEvent], None]] = []
-        self._on_vendor_sell: list[Callable[[VendorSellEvent], None]] = []
-        self._on_vendor_buy: list[Callable[[VendorBuyEvent], None]] = []
         self._on_turn_in: list[Callable[[TurnInEvent], None]] = []
         self._on_zone: list[Callable[[str], None]] = []
         self._on_auto_sold: list[Callable[[AutoSoldEvent], None]] = []
@@ -83,12 +73,6 @@ class LogWatcher:
 
     def on_loot(self, fn): self._on_loot.append(fn)
     def on_dialogue(self, fn): self._on_dialogue.append(fn)
-    def on_loc(self, fn): self._on_loc.append(fn)
-    def on_who(self, fn): self._on_who.append(fn)
-    def on_npc_target(self, fn): self._on_npc_target.append(fn)
-    def on_npc_slain(self, fn): self._on_npc_slain.append(fn)
-    def on_vendor_sell(self, fn): self._on_vendor_sell.append(fn)
-    def on_vendor_buy(self, fn): self._on_vendor_buy.append(fn)
     def on_turn_in(self, fn): self._on_turn_in.append(fn)
     def on_zone(self, fn): self._on_zone.append(fn)
     def on_auto_sold(self, fn): self._on_auto_sold.append(fn)
@@ -158,7 +142,7 @@ class LogWatcher:
         patterns = config.get("log_patterns", {})
         self._loot_parser.reload(patterns.get("loot_triggers", []))
         self._npc_parser.reload(patterns)
-        self._combat_parser.reload(patterns)
+        self._event_parser.reload(patterns)
         self._ts_pattern = re.compile(
             patterns.get("timestamp", r"\[\w+ \w+ +\d+ \d+:\d+:\d+ \d+\]")
         )
@@ -254,57 +238,15 @@ class LogWatcher:
                 except Exception: log.exception("on_dialogue callback error")
             return
 
-        loc = self._npc_parser.parse_loc(line)
-        if loc:
-            for fn in self._on_loc:
-                try: fn(loc)
-                except Exception: log.exception("on_loc callback error")
-            return
-
-        who = self._npc_parser.parse_who(line)
-        if who:
-            for fn in self._on_who:
-                try: fn(who)
-                except Exception: log.exception("on_who callback error")
-            return
-
-        # Combat / vendor parsers — silent, no alert fired from these
-        npc_target = self._combat_parser.parse_npc_target(line)
-        if npc_target:
-            for fn in self._on_npc_target:
-                try: fn(npc_target)
-                except Exception: log.exception("on_npc_target callback error")
-            return
-
-        npc_slain = self._combat_parser.parse_npc_slain(line)
-        if npc_slain:
-            for fn in self._on_npc_slain:
-                try: fn(npc_slain)
-                except Exception: log.exception("on_npc_slain callback error")
-            return
-
-        vendor_sell = self._combat_parser.parse_vendor_sell(line)
-        if vendor_sell:
-            for fn in self._on_vendor_sell:
-                try: fn(vendor_sell)
-                except Exception: log.exception("on_vendor_sell callback error")
-            return
-
-        vendor_buy = self._combat_parser.parse_vendor_buy(line)
-        if vendor_buy:
-            for fn in self._on_vendor_buy:
-                try: fn(vendor_buy)
-                except Exception: log.exception("on_vendor_buy callback error")
-            return
-
-        turn_in = self._combat_parser.parse_turn_in(line)
+        # Quest turn-in + auto-sold loot — silent, feed the journal + item DB
+        turn_in = self._event_parser.parse_turn_in(line)
         if turn_in:
             for fn in self._on_turn_in:
                 try: fn(turn_in)
                 except Exception: log.exception("on_turn_in callback error")
             return
 
-        auto_sold = self._combat_parser.parse_auto_sold(line)
+        auto_sold = self._event_parser.parse_auto_sold(line)
         if auto_sold:
             for fn in self._on_auto_sold:
                 try: fn(auto_sold)

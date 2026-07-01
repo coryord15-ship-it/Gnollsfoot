@@ -33,8 +33,7 @@ from app import quest_progress
 from app.db.models import create_db_engine, make_session_factory
 from app.db.queries import (
     get_item, get_items, delete_item, log_loot_event, prune_loot_events,
-    upsert_item, upsert_npc, add_dialogue, set_npc_location, verify_item,
-    log_vendor_price,
+    upsert_item, verify_item,
 )
 from app.log_watcher import LogWatcher
 from app.log_rotate import LogRotator
@@ -233,9 +232,8 @@ class AppState:
         # Populated from Supabase on startup so loot lookups never hit the network.
         self._community_cache: dict = {}
 
-        # Item names sold to / bought from vendors this session (Items tab filter)
+        # Item names auto-sold this session (Items tab filter)
         self._sold_items: set = set()
-        self._bought_items: set = set()
 
         # Auto-sold loot observations buffered for batched community submit, and
         # the current zone (tagged onto each observation + the overlay).
@@ -254,8 +252,6 @@ class AppState:
         self.main_window: MainWindow = None
         self.alert_window: AlertWindow = None
         self.overlay_window = None
-
-        self._last_npc_id: int = None
 
     def save_config(self):
         _save_config(self.config)
@@ -438,121 +434,33 @@ def _on_zone(app: AppState, zone: str):
 
 
 def _on_dialogue(app: AppState, evt):
+    """NPC said something — scan it for quest-item hints and, if one matches a
+    recently looted item, fire a quest hint. Purely in-memory; no NPC data stored."""
     def process():
-        npc, is_new = upsert_npc(app.db_session, evt.npc_name)
-        app._last_npc_id = npc.id
-
         hints = extract_item_hints(evt.text)
-        add_dialogue(app.db_session, npc.id, evt.text, hints or None)
-
-        if is_new:
-            app.main_window.after(0, lambda: app.alert_engine.loc_prompt(evt.npc_name))
-
-        if hints:
-            recent = [
-                r.item_name for r in
-                app.db_session.execute(
-                    __import__("sqlalchemy").text(
-                        "SELECT item_name FROM loot_events ORDER BY real_timestamp DESC LIMIT 20"
+        if not hints:
+            return
+        recent = [
+            r.item_name for r in
+            app.db_session.execute(
+                __import__("sqlalchemy").text(
+                    "SELECT item_name FROM loot_events ORDER BY real_timestamp DESC LIMIT 20"
+                )
+            ).fetchall()
+        ]
+        for hint in hints:
+            for looted in recent:
+                if hint.lower() in looted.lower() or looted.lower() in hint.lower():
+                    verified = bool(get_item(app.db_session, looted) and
+                                    get_item(app.db_session, looted).verified)
+                    app.main_window.after(
+                        0,
+                        lambda h=hint, l=looted, v=verified:
+                            app.alert_engine.quest_hint(l, evt.npc_name, h, v),
                     )
-                ).fetchall()
-            ]
-            for hint in hints:
-                for looted in recent:
-                    if hint.lower() in looted.lower() or looted.lower() in hint.lower():
-                        verified = bool(get_item(app.db_session, looted) and
-                                        get_item(app.db_session, looted).verified)
-                        app.main_window.after(
-                            0,
-                            lambda h=hint, l=looted, v=verified:
-                                app.alert_engine.quest_hint(l, evt.npc_name, h, v),
-                        )
-                        break
+                    break
 
     threading.Thread(target=process, daemon=True).start()
-
-
-def _on_loc(app: AppState, evt):
-    # Track zone from /who output to auto-fill drop location on alerts
-    if hasattr(evt, "zone") and evt.zone:
-        if app.alert_window:
-            app.alert_window.last_zone = evt.zone
-    if app._last_npc_id is None:
-        return
-    npc_id = app._last_npc_id
-    threading.Thread(
-        target=lambda: set_npc_location(app.db_session, npc_id, evt.x, evt.y, evt.z),
-        daemon=True,
-    ).start()
-
-
-def _on_npc_target(app: AppState, evt):
-    """Silently upsert the targeted NPC so it exists in the DB before a kill/loot."""
-    def _do():
-        npc, is_new = upsert_npc(app.db_session, evt.npc_name)
-        app._last_npc_id = npc.id
-        if is_new:
-            log.debug("New NPC discovered (target): %s", evt.npc_name)
-    threading.Thread(target=_do, daemon=True).start()
-
-
-def _on_npc_slain(app: AppState, evt):
-    """Silently confirm the NPC exists when we land the killing blow."""
-    def _do():
-        npc, is_new = upsert_npc(app.db_session, evt.npc_name)
-        if is_new:
-            log.debug("New NPC discovered (slain): %s", evt.npc_name)
-    threading.Thread(target=_do, daemon=True).start()
-
-
-def _on_vendor_sell(app: AppState, evt):
-    """Silently log a sell-to-vendor transaction — no popup, no sound."""
-    if evt.item_name:
-        app._sold_items.add(evt.item_name.lower())
-    def _do():
-        try:
-            log_vendor_price(
-                app.db_session,
-                item_name=evt.item_name,
-                merchant_name=evt.merchant_name,
-                transaction_type="sell",
-                price_copper=evt.price_copper,
-                price_raw=evt.price_raw,
-            )
-            log.debug("Vendor sell logged: %s → %s @ %s", evt.item_name, evt.merchant_name, evt.price_raw)
-            app.supabase.submit_vendor_price(
-                evt.item_name, evt.merchant_name, "sell",
-                evt.price_copper, evt.price_raw,
-            )
-        except Exception as exc:
-            log.warning("Vendor sell log failed: %s", exc)
-    threading.Thread(target=_do, daemon=True).start()
-
-
-def _on_vendor_buy(app: AppState, evt):
-    """Silently log a buy-from-vendor transaction — no popup, no sound."""
-    if evt.item_name:
-        app._bought_items.add(evt.item_name.lower())
-    def _do():
-        try:
-            log_vendor_price(
-                app.db_session,
-                item_name=evt.item_name,
-                merchant_name=evt.merchant_name,
-                transaction_type="buy",
-                price_copper=evt.price_copper,
-                price_raw=evt.price_raw,
-                quantity=evt.quantity,
-            )
-            log.debug("Vendor buy logged: %s × %d from %s @ %s",
-                      evt.item_name, evt.quantity, evt.merchant_name, evt.price_raw)
-            app.supabase.submit_vendor_price(
-                evt.item_name, evt.merchant_name, "buy",
-                evt.price_copper, evt.price_raw, evt.quantity,
-            )
-        except Exception as exc:
-            log.warning("Vendor buy log failed: %s", exc)
-    threading.Thread(target=_do, daemon=True).start()
 
 
 # ── System tray ───────────────────────────────────────────────────────────────
@@ -674,11 +582,6 @@ def main():
     # Wire log watcher callbacks
     app.log_watcher.on_loot(lambda evt: _on_loot(app, evt))
     app.log_watcher.on_dialogue(lambda evt: _on_dialogue(app, evt))
-    app.log_watcher.on_loc(lambda evt: _on_loc(app, evt))
-    app.log_watcher.on_npc_target(lambda evt: _on_npc_target(app, evt))
-    app.log_watcher.on_npc_slain(lambda evt: _on_npc_slain(app, evt))
-    app.log_watcher.on_vendor_sell(lambda evt: _on_vendor_sell(app, evt))
-    app.log_watcher.on_vendor_buy(lambda evt: _on_vendor_buy(app, evt))
     app.log_watcher.on_turn_in(lambda evt: _on_turn_in(app, evt))
     app.log_watcher.on_zone(lambda z: _on_zone(app, z))
     app.log_watcher.on_auto_sold(lambda evt: _on_auto_sold(app, evt))

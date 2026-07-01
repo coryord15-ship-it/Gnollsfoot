@@ -6,8 +6,8 @@ All writes must go through a background thread (never block the log watcher).
 import logging
 from datetime import datetime
 from sqlalchemy import (
-    Boolean, Column, DateTime, Float, ForeignKey,
-    Integer, String, Text, UniqueConstraint, create_engine, event, text
+    Boolean, Column, DateTime, ForeignKey,
+    Integer, Text, UniqueConstraint, create_engine, event, text
 )
 from sqlalchemy.orm import DeclarativeBase, relationship, sessionmaker
 import os
@@ -52,31 +52,12 @@ class NPC(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     name = Column(Text, nullable=False)
     zone = Column(Text)
-    loc_x = Column(Float)
-    loc_y = Column(Float)
-    loc_z = Column(Float)
-    # /loc may not exist in EQL — always check this flag before treating coords as valid
-    loc_verified = Column(Boolean, default=False)
     verified = Column(Boolean, default=False)
     source_url = Column(Text)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
-    dialogue = relationship("NPCDialogue", back_populates="npc", order_by="NPCDialogue.sequence_order")
     quest_items = relationship("Item", back_populates="quest_npc")
-
-
-class NPCDialogue(Base):
-    __tablename__ = "npc_dialogue"
-
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    npc_id = Column(Integer, ForeignKey("npcs.id"), nullable=False)
-    dialogue_text = Column(Text, nullable=False)
-    sequence_order = Column(Integer)       # order preserved for multi-step quest chains
-    item_hints = Column(Text)              # JSON array of extracted hint strings
-    created_at = Column(DateTime, default=datetime.utcnow)
-
-    npc = relationship("NPC", back_populates="dialogue")
 
 
 class LootEvent(Base):
@@ -89,33 +70,6 @@ class LootEvent(Base):
     zone = Column(Text)
     game_time = Column(Text)
     real_timestamp = Column(DateTime, default=datetime.utcnow)
-
-
-class CorrectionRequest(Base):
-    __tablename__ = "correction_requests"
-
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    target_type = Column(Text)             # 'item' | 'npc'
-    target_id = Column(Integer)
-    submitted_by = Column(Text)
-    correction_text = Column(Text)
-    status = Column(Text, default="pending")  # 'pending' | 'approved' | 'rejected'
-    created_at = Column(DateTime, default=datetime.utcnow)
-
-
-class VendorPrice(Base):
-    """Silent vendor economy data — every buy/sell transaction is logged here."""
-    __tablename__ = "vendor_prices"
-
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    item_name = Column(Text, nullable=False)
-    merchant_name = Column(Text, nullable=False)
-    # 'sell' = you sold TO the vendor; 'buy' = you bought FROM the vendor
-    transaction_type = Column(Text, nullable=False)
-    price_copper = Column(Integer, nullable=False)
-    price_raw = Column(Text)
-    quantity = Column(Integer, default=1)
-    created_at = Column(DateTime, default=datetime.utcnow)
 
 
 def _migrate_schema(engine):

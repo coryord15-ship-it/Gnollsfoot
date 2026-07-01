@@ -1,13 +1,13 @@
 """
-NPC dialogue, /loc, and /who capture.
-All patterns are configurable from settings.json.
+NPC dialogue capture + lightweight item-hint extraction.
 
-/loc may not exist in EQL — if the pattern never matches, we fail gracefully
-and leave loc_verified=False rather than raising an error.
+This is used only to spot quest-item hints in NPC speech (e.g. an NPC asking for
+a "red feather") and fuzzy-match them against recently looted items. No NPC
+location/mapping is tracked. The dialogue pattern is configurable in settings.json.
 """
 
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Optional
 
 
@@ -18,31 +18,12 @@ class DialogueEvent:
     raw_line: str = ""
 
 
-@dataclass
-class LocEvent:
-    x: float
-    y: float
-    z: float
-    raw_line: str = ""
-
-
-@dataclass
-class WhoEvent:
-    player: str
-    guild: Optional[str] = None
-    raw_line: str = ""
-
-
 class NPCParser:
     def __init__(self, patterns: dict):
         self._reload(patterns)
 
     def _reload(self, patterns: dict):
         self._dialogue = re.compile(patterns.get("npc_dialogue", ""), re.IGNORECASE)
-        # /loc capture — optional in EQL; compiled but may never match
-        loc_pat = patterns.get("loc_output", "")
-        self._loc = re.compile(loc_pat, re.IGNORECASE) if loc_pat else None
-        self._who = re.compile(patterns.get("who_output", ""), re.IGNORECASE)
 
     def reload(self, patterns: dict):
         self._reload(patterns)
@@ -55,29 +36,6 @@ class NPCParser:
         return DialogueEvent(
             npc_name=g.get("npc", "").strip(),
             text=g.get("text", "").strip(),
-            raw_line=line,
-        )
-
-    def parse_loc(self, line: str) -> Optional[LocEvent]:
-        if not self._loc:
-            return None
-        m = self._loc.search(line)
-        if not m:
-            return None
-        g = m.groupdict()
-        try:
-            return LocEvent(x=float(g["x"]), y=float(g["y"]), z=float(g["z"]), raw_line=line)
-        except (KeyError, ValueError):
-            return None
-
-    def parse_who(self, line: str) -> Optional[WhoEvent]:
-        m = self._who.search(line)
-        if not m:
-            return None
-        g = m.groupdict()
-        return WhoEvent(
-            player=g.get("player", "").strip(),
-            guild=g.get("guild", "").strip() or None,
             raw_line=line,
         )
 

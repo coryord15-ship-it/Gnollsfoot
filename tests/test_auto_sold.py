@@ -1,5 +1,5 @@
 """Auto-sold loot parsing, pinned to real EQL beta log lines (Marnos, 2026-06-27/28)."""
-from app.parsers.combat_parser import CombatParser, split_tier
+from app.parsers.game_events import GameEventParser, split_tier
 
 
 def test_split_tier():
@@ -9,7 +9,7 @@ def test_split_tier():
 
 
 def test_parse_auto_sold_real_lines():
-    p = CombatParser({})
+    p = GameEventParser({})
 
     e = p.parse_auto_sold(
         "You looted an Undead Froglok Tongue from a wan ghoul knight's corpse "

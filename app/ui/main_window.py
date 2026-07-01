@@ -205,13 +205,6 @@ class MainWindow(ctk.CTk):
                         not self._app.auth.preview_non_admin
                     ),
                 ).pack(side="left", padx=(0, theme.PAD_SM))
-                ctk.CTkButton(
-                    self._auth_frame, text="Sync", width=60,
-                    fg_color="transparent", text_color=theme.TEXT_SECONDARY,
-                    hover_color=theme.PANEL_HOVER, font=theme.FONT_BODY_SMALL,
-                    border_width=1, border_color=theme.BORDER,
-                    command=self._admin_sync,
-                ).pack(side="left", padx=(0, theme.PAD_SM))
             ctk.CTkButton(
                 self._auth_frame, text="Logout", width=64,
                 fg_color="transparent", text_color=theme.TEXT_MUTED,
@@ -226,22 +219,6 @@ class MainWindow(ctk.CTk):
                 hover_color="#4752C4", font=theme.FONT_BODY_SMALL,
                 command=lambda: self._app.auth.sign_in_discord(),
             ).pack(side="left")
-
-    def _admin_sync(self):
-        """Admin: push captured NPC dialogue to the community (verification store)."""
-        self._sync_label.configure(text="Syncing…")
-
-        def run():
-            try:
-                from app.db.queries import get_all_dialogue
-                rows = get_all_dialogue(self._app.db_session)
-                n = self._app.supabase.push_npc_dialogue(rows)
-                self.after(0, lambda: self._sync_label.configure(text=f"Synced {n} dialogue lines"))
-            except Exception:
-                log.exception("admin sync failed")
-                self.after(0, lambda: self._sync_label.configure(text="Sync failed"))
-
-        threading.Thread(target=run, daemon=True).start()
 
     # ── Alerts tab ────────────────────────────────────────────────────────────
 
@@ -667,7 +644,6 @@ class MainWindow(ctk.CTk):
             self.after(0, self._refresh_items)
         try:
             getattr(self._app, "_sold_items", set()).clear()
-            getattr(self._app, "_bought_items", set()).clear()
         except Exception:
             pass
         threading.Thread(target=_do, daemon=True).start()
