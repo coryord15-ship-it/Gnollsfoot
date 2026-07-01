@@ -42,8 +42,6 @@ a = Analysis(
         'app.db.export',
         'app.parsers.loot_parser',
         'app.parsers.npc_parser',
-        'app.research.queue',
-        'app.research.scraper',
         'app.alerts.engine',
         'app.alerts.window',
         'app.sync.supabase',

@@ -75,7 +75,6 @@ class LogWatcher:
         self._on_zone: list[Callable[[str], None]] = []
         self._on_auto_sold: list[Callable[[AutoSoldEvent], None]] = []
         self._on_any_line: list[Callable[[], None]] = []  # for the silence timer
-        self._on_raw_line: list[Callable[[str], None]] = []  # full timestamped lines (fight tracker)
 
         self.status = "stopped"  # 'watching' | 'paused' | 'error' | 'stopped'
         self._partial_line = ""  # buffer for incomplete lines between watchdog reads
@@ -94,7 +93,6 @@ class LogWatcher:
     def on_zone(self, fn): self._on_zone.append(fn)
     def on_auto_sold(self, fn): self._on_auto_sold.append(fn)
     def on_any_line(self, fn): self._on_any_line.append(fn)
-    def on_raw_line(self, fn): self._on_raw_line.append(fn)
 
     # ── Lifecycle ────────────────────────────────────────────────────────────
 
@@ -224,11 +222,6 @@ class LogWatcher:
         # Only parse lines that start with the expected timestamp
         if not self._ts_pattern.match(line):
             return
-
-        # Full timestamped line feed (the fight/DPS tracker buffers these)
-        for fn in self._on_raw_line:
-            try: fn(line)
-            except Exception: log.exception("on_raw_line callback error")
 
         # Zone change — "You have entered <Zone> <N> (<Label>)." or the status echo
         # "You are currently in: <Zone> <N> (<Label>)". EQL appends a difficulty

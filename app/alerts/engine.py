@@ -65,17 +65,6 @@ class AlertEngine:
             npc_name=npc_name,
         ))
 
-    def item_researching(self, name: str, npc_name: str = ""):
-        self._emit(Alert(
-            title=name,
-            body="Researching this item in the background…",
-            color=theme.ALERT_RESEARCHING,
-            badge="Researching...",
-            alert_type="research",
-            item_name=name,
-            npc_name=npc_name,
-        ))
-
     def quest_hint(self, item_name: str, npc_name: str, hint: str, verified: bool):
         color = theme.ALERT_QUEST_VERIFIED if verified else theme.ALERT_QUEST_UNVERIFIED
         badge = "Quest Match" if verified else "Quest Hint"

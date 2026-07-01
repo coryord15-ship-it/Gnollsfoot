@@ -149,14 +149,6 @@ class SettingsTab(ctk.CTkFrame):
             command=lambda v: vol_val.configure(text=f"{int(v)}%"),
         ).pack(side="right", padx=theme.PAD, fill="x", expand=True)
 
-        self._section(scroll, "Research")
-        self._silence_var = ctk.IntVar(
-            value=int(self._app.config.get("research_silence_seconds", 6))
-        )
-        self._slider_row(
-            scroll, "Log silence before web search (seconds)", self._silence_var, 2, 30,
-        )
-
         self._export_dir_var = ctk.StringVar(
             value=self._app.config.get("export_directory", "")
         )
@@ -353,7 +345,6 @@ class SettingsTab(ctk.CTkFrame):
         self._app.config["alert_duration_seconds"] = self._duration_var.get()
         self._app.config["audio_enabled"] = self._audio_var.get()
         self._app.config["audio_volume"] = self._volume_var.get()
-        self._app.config["research_silence_seconds"] = self._silence_var.get()
         self._app.config["export_directory"] = self._export_dir_var.get()
         self._app.config["clipboard_ocr_enabled"] = self._ocr_var.get()
         if self._supa_url_var.get().strip():
@@ -377,9 +368,6 @@ class SettingsTab(ctk.CTkFrame):
         else:
             mb.showinfo("Settings Saved",
                         "Settings saved. Restart the app to apply log changes.")
-
-    def refresh_llm_status(self, status: str):
-        pass  # no-op — LLM backend removed; scraper status shown in main window status bar
 
     def _check_for_updates(self):
         self._update_status_var.set("Checking…")

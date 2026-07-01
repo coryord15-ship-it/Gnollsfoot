@@ -1,19 +1,16 @@
 """
-GnollGuard entry point.
+Gnoll Guard entry point — a Quest Journal + Item Database utility for EverQuest Legends.
 
-Startup sequence:
+Startup:
 1. Load config from settings.json.
 2. Initialize SQLite DB.
-3. Start the research queue (scraper-backed, no LLM).
-4. Start the log watcher (if a log path is configured).
-5. Build the main UI + floating alert window.
-6. Wire all the pieces together.
-7. Hand control to the tkinter event loop.
-8. Start the system tray icon (in its own thread).
+3. Start the log watcher (if a log path is configured).
+4. Build the UI + floating quest-item alert window.
+5. Wire the pieces together and hand control to the tkinter event loop.
+6. Start the system tray icon (in its own thread).
 
-Community Mode (current default): unknown items are scraped from the EQL wiki
-and community sites. Verified items sync to Supabase anonymously.
-LLM research is archived in _llm_phase2/ for future use.
+The app reads your EverQuest log to tick off Quest Journal items and silently
+contribute item data to the community database. Verified items sync to Supabase.
 """
 
 import json
@@ -44,8 +41,6 @@ from app.log_watcher import LogWatcher
 from app.log_rotate import LogRotator
 from app.parsers.item_ocr import ocr_image, parse_item_text
 from app.parsers.npc_parser import extract_item_hints
-from app.research.queue import ResearchQueue
-from app.research.scraper import scrape_item
 from app.updater import UpdateChecker
 from app.sync.auth import AuthManager
 from app.sync.supabase import SupabaseSync
@@ -219,12 +214,6 @@ class AppState:
             self.config.get("supabase_key", "") or "sb_publishable_hI8WF4abCLXa3SvVrChszA_z-Udl584",
         )
         self.auth = AuthManager(self.supabase._client)
-
-        # Research queue — drains during log silence, calls scraper directly
-        self.research_queue = ResearchQueue(
-            silence_seconds=float(self.config.get("research_silence_seconds", 6)),
-            cooldown_seconds=float(self.config.get("research_cooldown_seconds", 1)),
-        )
 
         # Alert engine
         self.alert_engine = AlertEngine()
@@ -569,37 +558,6 @@ def _on_vendor_buy(app: AppState, evt):
     threading.Thread(target=_do, daemon=True).start()
 
 
-def _research_fn(app: AppState, item_name: str):
-    """Executed by the ResearchQueue worker — scrapes web for item info."""
-    sources = app.config.get("scrape_sources", [])
-    content, source_url = scrape_item(item_name, sources)
-
-    def write_and_alert():
-        try:
-            if content:
-                upsert_item(app.db_session, {
-                    "name": item_name,
-                    "description": content[:600],
-                    "source_url": source_url,
-                    "verified": False,
-                    "submitted_by": "scraper",
-                })
-        except Exception as e:
-            log.error("Failed to write scrape result for '%s': %s", item_name, e)
-
-        item = get_item(app.db_session, item_name)
-        desc = (item.description if item else None) or \
-               "No info found yet — upload a screenshot at gnollguard.com"
-        url = (item.source_url if item else None) or ""
-        if app.main_window:
-            app.main_window.after(
-                0,
-                lambda: app.alert_engine.item_unverified(item_name, desc, url),
-            )
-
-    threading.Thread(target=write_and_alert, daemon=True).start()
-
-
 # ── System tray ───────────────────────────────────────────────────────────────
 
 def _build_tray(app: AppState):
@@ -641,7 +599,6 @@ def _shutdown(app: AppState):
     def do_shutdown():
         app.log_watcher.stop()
         app.log_rotator.stop()
-        app.research_queue.stop()
         try:
             app.db_session.close()
         except Exception:
@@ -717,10 +674,6 @@ def main():
 
     app = AppState()
 
-    # Wire research queue → scraper
-    app.research_queue.set_research_fn(lambda name: _research_fn(app, name))
-    app.research_queue.start()
-
     # Wire log watcher callbacks
     app.log_watcher.on_loot(lambda evt: _on_loot(app, evt))
     app.log_watcher.on_dialogue(lambda evt: _on_dialogue(app, evt))
@@ -732,7 +685,6 @@ def main():
     app.log_watcher.on_turn_in(lambda evt: _on_turn_in(app, evt))
     app.log_watcher.on_zone(lambda z: _on_zone(app, z))
     app.log_watcher.on_auto_sold(lambda evt: _on_auto_sold(app, evt))
-    app.log_watcher.on_any_line(app.research_queue.on_log_activity)
 
     # Build UI
     win = MainWindow(app)
@@ -816,12 +768,6 @@ def main():
         win.after(0, lambda a=alert: win.add_alert_row(a, on_verify=on_verify_item))
 
     app.alert_engine.add_listener(on_alert)
-
-    # Wire research queue status → status bar
-    def on_queue_status(status: str):
-        win.after(0, lambda s=status: win.update_llm_status(s))
-
-    app.research_queue._on_status_change = on_queue_status
 
     # Wire log watcher status → status bar
     def poll_watcher_status():

@@ -1,7 +1,7 @@
 """
 Main application window (opened from the system tray).
 Tabs: Recent Alerts | Items | Settings
-Status bar at the bottom shows LLM research state and log watcher state.
+Status bar at the bottom shows the log watcher state.
 """
 
 import logging
@@ -693,10 +693,6 @@ class MainWindow(ctk.CTk):
         self._items_msg("Cleared.")
 
     # ── Status bar updates ────────────────────────────────────────────────────
-
-    def update_llm_status(self, status: str):
-        # Scraping is disabled; no-op to avoid AttributeError on old callers.
-        pass
 
     def update_watcher_status(self, status: str):
         if status.startswith("watching"):
