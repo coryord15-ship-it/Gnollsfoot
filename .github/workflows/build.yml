@@ -1,0 +1,78 @@
+name: Build GnollGuard.exe
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:   # lets you trigger a build by hand from the Actions tab
+
+permissions:
+  contents: write      # needed to publish the release + upload the .exe
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Build GnollGuard.exe
+        run: pyinstaller GnollGuard.spec --clean --noconfirm
+
+      - name: Read version
+        id: ver
+        run: |
+          $v = python -c "from app.version import __version__; print(__version__)"
+          echo "version=$v" >> $env:GITHUB_OUTPUT
+
+      - name: Ensure Inno Setup is installed
+        run: choco install innosetup --no-progress -y
+
+      - name: Build GnollGuard-Setup.exe (Inno Setup installer)
+        run: |
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" /DAppVersion=${{ steps.ver.outputs.version }} /Q installer\GnollGuard.iss
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: GnollGuard-v${{ steps.ver.outputs.version }}
+          path: |
+            dist/GnollGuard.exe
+            installer/Output/GnollGuard-Setup.exe
+          retention-days: 30
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_type == 'tag' && github.ref_name || format('v{0}', steps.ver.outputs.version) }}
+          name: Gnoll Guard v${{ steps.ver.outputs.version }}
+          files: |
+            dist/GnollGuard.exe
+            installer/Output/GnollGuard-Setup.exe
+          body: |
+            ## Gnoll Guard v${{ steps.ver.outputs.version }}
+
+            ### Download options
+
+            | File | Description |
+            |---|---|
+            | **GnollGuard-Setup.exe** | ✅ Recommended — installs to your PC, adds Start Menu + Desktop shortcuts, includes uninstaller |
+            | GnollGuard.exe | Portable — run from anywhere, no installation needed |
+
+            The app watches your EverQuest Legends log file, alerts you the moment you
+            loot something, looks the item up, and helps build the community database at
+            legendsgnollloot.com.
+
+            **Requirements:** Windows 10 / 11 (64-bit). Nothing else to install.

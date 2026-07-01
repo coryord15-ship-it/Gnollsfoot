@@ -1,0 +1,27 @@
+__pycache__/
+*.py[cod]
+*.pycache
+.pytest_cache/
+*.egg-info/
+dist/
+dist_preview/
+dist_test/
+build/
+.env
+*.log
+gnollloot.db
+exports/
+# Generated artwork outputs — raw sources (tools/*_raw.png) are versioned, crops are not
+tools/output/
+# Original Gemini exports kept locally for re-cropping; not committed
+tools/Gemini_Generated_*
+# Don't ignore assets — placeholder PNGs are committed
+!assets/
+# Local secrets file -- NEVER commit this
+tools/.secrets.ps1
+# Raw wiki harvest dump — large (~6MB+), regenerate with tools/harvest_eqlwiki.py
+eqlwiki_dump.json
+# Parsed wiki reference data — seeded into Supabase, not committed
+tools/wikidata/
+# Local Supabase service-role key for the import script — NEVER commit
+tools/.supabase_service_key

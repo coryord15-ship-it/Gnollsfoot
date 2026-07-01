@@ -1,0 +1,29 @@
+Gnoll Guard - Disclaimer & Terms of Use
+
+Gnoll Guard is a free, community-made companion tool for EverQuest Legends.
+
+NOT AFFILIATED
+Gnoll Guard is not affiliated with, endorsed by, or sponsored by Daybreak Game
+Company, Darkpaw Games, or the EverQuest Legends team. "EverQuest" and all related
+names and marks are the property of their respective owners.
+
+WHAT IT DOES
+Gnoll Guard reads your EverQuest log file to show loot alerts, parse your DPS, and
+track quests. It does NOT modify the game, read game memory, inject code, or
+automate gameplay in any way.
+
+USE AT YOUR OWN RISK
+This software is provided "AS IS", without warranty of any kind, express or implied.
+You use it at your own risk. The authors are not liable for any damages, lost data,
+or account actions arising from its use. Always follow the rules and Terms of
+Service of EverQuest Legends and Daybreak Game Company.
+
+PRIVACY
+Community contributions (such as item names and drop locations) are submitted
+anonymously to improve the shared database. Gnoll Guard does not collect personal
+information.
+
+BETA SOFTWARE
+This is early-stage software and may contain bugs.
+
+By installing Gnoll Guard, you acknowledge that you have read and accept the above.
