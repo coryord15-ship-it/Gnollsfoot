@@ -20,7 +20,6 @@ import customtkinter as ctk
 from PIL import Image
 
 from app.ui import theme
-from app.ui.settings import SettingsTab
 
 try:
     import requests
@@ -43,11 +42,11 @@ def _asset(*parts) -> str:
 class JournalOverlay(ctk.CTkToplevel):
     """Detached, always-on-top quest overlay tied to the main app (a child window,
     toggled from Settings → 'Enable Overlay Window')."""
+    # Quest-focused HUD. Settings/Items live in the main window, not here.
     TABS = [
         ("journal", "📖  Journal"),
         ("popular", "🔥  Popular"),
         ("zone",    "🗺  In Zone"),
-        ("settings", "⚙  Settings"),
     ]
 
     def __init__(self, master, app_state):
@@ -152,6 +151,18 @@ class JournalOverlay(ctk.CTkToplevel):
         if off:
             self.geometry(f"+{event.x_root - off[0]}+{event.y_root - off[1]}")
 
+    def _resize_start(self, event):
+        self._resize_off = (event.x_root, event.y_root, self.winfo_width(), self.winfo_height())
+
+    def _resize_move(self, event):
+        o = getattr(self, "_resize_off", None)
+        if not o:
+            return
+        sx, sy, sw, sh = o
+        w = max(300, sw + (event.x_root - sx))   # clamp to minsize (300x380)
+        h = max(380, sh + (event.y_root - sy))
+        self.geometry(f"{w}x{h}")
+
     # ── Layout ────────────────────────────────────────────────────────────────
 
     def _build(self):
@@ -202,8 +213,6 @@ class JournalOverlay(ctk.CTkToplevel):
         self._build_journal_tab(self._sections["journal"])
         self._build_popular_tab(self._sections["popular"])
         self._build_zone_tab(self._sections["zone"])
-        self._settings_tab = SettingsTab(self._sections["settings"], self._app)
-        self._settings_tab.pack(fill="both", expand=True)
 
         # Status bar
         sb = ctk.CTkFrame(self, fg_color=theme.PANEL, height=22, corner_radius=0)
@@ -217,6 +226,14 @@ class JournalOverlay(ctk.CTkToplevel):
         self._watcher_label.pack(side="left")
         self._sync_label = ctk.CTkLabel(sb, text="", font=theme.FONT_BODY_SMALL, text_color=theme.TEXT_MUTED)
         self._sync_label.pack(side="right", padx=theme.PAD)
+
+        # Resize grip (bottom-right) — needed because the borderless overlay has no
+        # OS resize border. Drag it to resize.
+        self._grip = ctk.CTkLabel(self, text="◢", font=("Segoe UI", 12),
+                                  text_color=theme.TEXT_MUTED, cursor="size_nw_se")
+        self._grip.place(relx=1.0, rely=1.0, anchor="se", x=-2, y=-2)
+        self._grip.bind("<ButtonPress-1>", self._resize_start)
+        self._grip.bind("<B1-Motion>", self._resize_move)
 
         self._active = None
         self._show("journal")
