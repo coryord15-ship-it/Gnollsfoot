@@ -101,16 +101,9 @@ class JournalOverlay(ctk.CTkToplevel):
         self._version = __version__
         self._current_zone = None
         self._popular_loaded = False
-        # Click-through state: when the cursor is over empty/background areas the
-        # window is made transparent to the mouse so clicks fall through to the
-        # game; over our text/buttons it stays clickable. (Windows-only.)
-        self._hwnd = None
-        self._click_through = False
         self._build()
         # Pull the overlay to the front shortly after launch so it's never hidden.
         self.after(200, self._surface)
-        # Start the click-through cursor watcher once the window is realized.
-        self.after(600, self._poll_click_through)
 
     def _surface(self):
         try:
@@ -532,75 +525,6 @@ class JournalOverlay(ctk.CTkToplevel):
                 self.after(0, lambda: _mb.showerror("Update Failed",
                     f"Could not download update:\n{e}\n\nDownload manually at gnollguard.com/download"))
         threading.Thread(target=_do, daemon=True).start()
-
-    # ── Click-through (pass clicks to the game when not over our content) ──────
-
-    # Widgets we consider "interactive" — hovering these keeps the window
-    # clickable; anything else (bare frames / padding / empty scroll area) lets
-    # the click fall through to whatever is behind the overlay.
-    _INTERACTIVE = (
-        "CTkButton", "CTkLabel", "CTkEntry", "CTkTextbox", "CTkSwitch",
-        "CTkOptionMenu", "CTkComboBox", "CTkCheckBox", "CTkSlider",
-        "CTkScrollbar", "Label", "Button", "Entry",
-    )
-
-    def _get_hwnd(self):
-        if self._hwnd:
-            return self._hwnd
-        try:
-            from ctypes import windll
-            wid = self.winfo_id()
-            hwnd = windll.user32.GetParent(wid) or wid
-            self._hwnd = hwnd
-            return hwnd
-        except Exception:
-            return None
-
-    def _is_interactive(self, w):
-        node, depth = w, 0
-        while node is not None and depth < 8:
-            if node.__class__.__name__ in self._INTERACTIVE:
-                return True
-            node = getattr(node, "master", None)
-            depth += 1
-        return False
-
-    def _set_click_through(self, on: bool):
-        if on == self._click_through:
-            return
-        hwnd = self._get_hwnd()
-        if not hwnd:
-            return
-        try:
-            from ctypes import windll
-            GWL_EXSTYLE = -20
-            WS_EX_LAYERED = 0x00080000      # keep so -alpha opacity still applies
-            WS_EX_TRANSPARENT = 0x00000020  # mouse events pass through
-            ex = windll.user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
-            ex = (ex | WS_EX_TRANSPARENT | WS_EX_LAYERED) if on \
-                else ((ex & ~WS_EX_TRANSPARENT) | WS_EX_LAYERED)
-            windll.user32.SetWindowLongW(hwnd, GWL_EXSTYLE, ex)
-            self._click_through = on
-        except Exception:
-            pass
-
-    def _poll_click_through(self):
-        """Every ~60ms, decide whether the cursor is over our content or over
-        empty space, and toggle mouse click-through accordingly. Uses the global
-        cursor position + Tk geometry so it works even while click-through is on
-        (the window gets no mouse events in that state)."""
-        if not self.winfo_exists():
-            return
-        try:
-            if self._app.config.get("overlay_click_through", True):
-                w = self.winfo_containing(self.winfo_pointerx(), self.winfo_pointery())
-                # w is None when the cursor is outside our windows (over the game).
-                self._set_click_through(not self._is_interactive(w))
-            else:
-                self._set_click_through(False)
-        except Exception:
-            pass
-        self.after(60, self._poll_click_through)
 
     # ── Close → hide to tray ────────────────────────────────────────────────--
 
