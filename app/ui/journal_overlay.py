@@ -144,12 +144,16 @@ class JournalOverlay(ctk.CTkToplevel):
             pass
 
     def _drag_start(self, event):
+        self._dragging = True
         self._drag_off = (event.x_root - self.winfo_x(), event.y_root - self.winfo_y())
 
     def _drag_move(self, event):
         off = getattr(self, "_drag_off", None)
         if off:
             self.geometry(f"+{event.x_root - off[0]}+{event.y_root - off[1]}")
+
+    def _drag_end(self, event):
+        self._dragging = False
 
     def _resize_start(self, event):
         self._resize_off = (event.x_root, event.y_root, self.winfo_width(), self.winfo_height())
@@ -170,6 +174,7 @@ class JournalOverlay(ctk.CTkToplevel):
         hdr = ctk.CTkFrame(self, fg_color=theme.PANEL, height=36, corner_radius=0)
         hdr.pack(fill="x")
         hdr.pack_propagate(False)
+        self._ct_grab = hdr   # header = always-solid grab zone (never click-through)
         try:
             _icon = ctk.CTkImage(Image.open(_asset("icon.png")), size=(20, 20))
             ctk.CTkLabel(hdr, image=_icon, text="").pack(side="left", padx=(theme.PAD, theme.PAD_SM))
@@ -186,6 +191,7 @@ class JournalOverlay(ctk.CTkToplevel):
         for _w in (hdr, _title):
             _w.bind("<ButtonPress-1>", self._drag_start)
             _w.bind("<B1-Motion>", self._drag_move)
+            _w.bind("<ButtonRelease-1>", self._drag_end)
         self._auth_frame = ctk.CTkFrame(hdr, fg_color="transparent")
         self._auth_frame.pack(side="right", padx=theme.PAD)
         self._refresh_auth_header()
@@ -573,10 +579,13 @@ class JournalOverlay(ctk.CTkToplevel):
             return None
 
     def _ct_interactive(self, w):
-        """True only if the cursor is over an interactive widget that belongs to
-        THIS overlay (so hovering the main window never keeps the overlay solid)."""
+        """Stay solid/clickable if the cursor is over the header grab-zone, or an
+        interactive widget that belongs to THIS overlay."""
+        grab = getattr(self, "_ct_grab", None)
         node, depth, under_self, interactive = w, 0, False, False
         while node is not None and depth < 12:
+            if node is grab:                 # header = always solid (so you can drag)
+                return True
             if node is self:
                 under_self = True
             if node.__class__.__name__ in self._CT_INTERACTIVE:
@@ -594,13 +603,20 @@ class JournalOverlay(ctk.CTkToplevel):
         try:
             from ctypes import windll
             GWL_EXSTYLE = -20
-            WS_EX_LAYERED = 0x00080000      # keep so -alpha opacity still applies
             WS_EX_TRANSPARENT = 0x00000020  # mouse events pass through
+            # Only toggle the TRANSPARENT bit — do NOT touch WS_EX_LAYERED; that's
+            # Tk's -alpha (opacity). Leaving it alone stops us fighting the layered
+            # window (which was making it vanish at <100% opacity).
             ex = windll.user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
-            ex = (ex | WS_EX_TRANSPARENT | WS_EX_LAYERED) if on \
-                else ((ex & ~WS_EX_TRANSPARENT) | WS_EX_LAYERED)
+            ex = (ex | WS_EX_TRANSPARENT) if on else (ex & ~WS_EX_TRANSPARENT)
             windll.user32.SetWindowLongW(hwnd, GWL_EXSTYLE, ex)
             self._ct_on = on
+            # Changing the exstyle can drop the layered alpha → re-assert opacity so
+            # the window never disappears when click-through toggles.
+            try:
+                self.attributes("-alpha", float(self._app.config.get("overlay_opacity", 0.92)))
+            except Exception:
+                pass
         except Exception:
             self._ct_dead = True
 
@@ -608,7 +624,9 @@ class JournalOverlay(ctk.CTkToplevel):
         if self._ct_dead or not self.winfo_exists():
             return
         try:
-            if self._app.config.get("overlay_click_through", True):
+            if getattr(self, "_dragging", False):
+                self._ct_set(False)          # never click-through mid-drag
+            elif self._app.config.get("overlay_click_through", True):
                 w = self.winfo_containing(self.winfo_pointerx(), self.winfo_pointery())
                 self._ct_set(not self._ct_interactive(w))
             elif self._ct_on:
