@@ -101,9 +101,16 @@ class JournalOverlay(ctk.CTkToplevel):
         self._version = __version__
         self._current_zone = None
         self._popular_loaded = False
+        # Click-through state (Windows-only, safe-by-construction — see _ct_* below)
+        self._ct_hwnd = None    # our OWN validated top-level hwnd, cached
+        self._ct_on = False     # current click-through state
+        self._ct_dead = False   # True once we've decided it's unavailable/unsafe
         self._build()
         # Pull the overlay to the front shortly after launch so it's never hidden.
         self.after(200, self._surface)
+        # Click-through watcher — only starts touching window styles after the
+        # window is realized, and only ever on our own process's window.
+        self.after(700, self._ct_poll)
 
     def _surface(self):
         try:
@@ -528,9 +535,95 @@ class JournalOverlay(ctk.CTkToplevel):
 
     # ── Close → hide to tray ────────────────────────────────────────────────--
 
+    # ── Click-through (SAFE) — clicks fall to the game unless over our content ──
+    #
+    # HARD SAFETY RULE (learned from a shell-freeze): NEVER use GetParent(); on a
+    # borderless window that can return the DESKTOP handle, and stamping styles on
+    # the shell freezes the whole PC. We only ever act on our OWN top-level window
+    # (self.winfo_id()) AND only after confirming that handle belongs to THIS
+    # process. Worst case a bug can do is toggle our own overlay's clickability —
+    # it can never touch the desktop/shell/another app.
+    _CT_INTERACTIVE = (
+        "CTkButton", "CTkLabel", "CTkEntry", "CTkTextbox", "CTkSwitch",
+        "CTkOptionMenu", "CTkComboBox", "CTkCheckBox", "CTkSlider",
+        "CTkScrollbar", "Label", "Button", "Entry",
+    )
+
+    def _ct_hwnd_safe(self):
+        """Our overlay's OWN hwnd, but only if it belongs to this process."""
+        if self._ct_dead:
+            return None
+        if self._ct_hwnd:
+            return self._ct_hwnd
+        try:
+            import os
+            from ctypes import windll, byref, c_ulong
+            hwnd = self.winfo_id()          # our own window — NEVER GetParent
+            if not hwnd:
+                return None
+            pid = c_ulong(0)
+            windll.user32.GetWindowThreadProcessId(hwnd, byref(pid))
+            if pid.value != os.getpid():    # not ours → refuse to touch it, ever
+                self._ct_dead = True
+                return None
+            self._ct_hwnd = hwnd
+            return hwnd
+        except Exception:
+            self._ct_dead = True
+            return None
+
+    def _ct_interactive(self, w):
+        """True only if the cursor is over an interactive widget that belongs to
+        THIS overlay (so hovering the main window never keeps the overlay solid)."""
+        node, depth, under_self, interactive = w, 0, False, False
+        while node is not None and depth < 12:
+            if node is self:
+                under_self = True
+            if node.__class__.__name__ in self._CT_INTERACTIVE:
+                interactive = True
+            node = getattr(node, "master", None)
+            depth += 1
+        return interactive and under_self
+
+    def _ct_set(self, on: bool):
+        if on == self._ct_on:
+            return
+        hwnd = self._ct_hwnd_safe()
+        if not hwnd:
+            return
+        try:
+            from ctypes import windll
+            GWL_EXSTYLE = -20
+            WS_EX_LAYERED = 0x00080000      # keep so -alpha opacity still applies
+            WS_EX_TRANSPARENT = 0x00000020  # mouse events pass through
+            ex = windll.user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
+            ex = (ex | WS_EX_TRANSPARENT | WS_EX_LAYERED) if on \
+                else ((ex & ~WS_EX_TRANSPARENT) | WS_EX_LAYERED)
+            windll.user32.SetWindowLongW(hwnd, GWL_EXSTYLE, ex)
+            self._ct_on = on
+        except Exception:
+            self._ct_dead = True
+
+    def _ct_poll(self):
+        if self._ct_dead or not self.winfo_exists():
+            return
+        try:
+            if self._app.config.get("overlay_click_through", True):
+                w = self.winfo_containing(self.winfo_pointerx(), self.winfo_pointery())
+                self._ct_set(not self._ct_interactive(w))
+            elif self._ct_on:
+                self._ct_set(False)          # feature off → make sure it's clickable
+        except Exception:
+            pass
+        self.after(80, self._ct_poll)
+
     def _on_close(self):
         """Close just the overlay (the main window keeps running). Persists the
         position and flips the 'Enable Overlay Window' setting off."""
+        try:
+            self._ct_set(False)   # never leave the window click-through on close
+        except Exception:
+            pass
         try:
             self._save_geometry()
         except Exception:
