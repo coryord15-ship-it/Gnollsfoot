@@ -1,8 +1,11 @@
 @echo off
-title Gnoll Guard 1.3.0 (dev/test)
-cd /d "C:\Users\coryo\Documents\INTERNETSTUFF\codex\GnollGuard"
-echo Launching Gnoll Guard 1.3.0 from source...
-echo (Keep this window open - it shows DPS log lines and any errors.)
+title Gnoll Guard (dev - current source)
+REM Run from THIS folder (_migrate\app = the canonical Gnollsfoot code), never a
+REM hardcoded path. %~dp0 is the directory this .bat lives in.
+cd /d "%~dp0"
+echo Launching Gnoll Guard from source:
+echo   %~dp0
+echo (Keep this window open - it shows any errors.)
 echo.
 py -3.11 app\main.py
 echo.
