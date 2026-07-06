@@ -46,27 +46,35 @@ from app.ui.main_window import MainWindow
 log = logging.getLogger(__name__)
 
 
-def _resolve_config_path() -> str:
-    """
-    When frozen (installed .exe), config lives in %APPDATA%\GnollGuard\ so it
-    persists across updates. On first run, the bundled defaults are copied there.
-    When running from source, use the repo's config/settings.json as normal.
-    """
+def _bundled_config_path() -> str:
+    """Path to the read-only DEFAULT settings that ship with the app (never written
+    to). Frozen: inside the PyInstaller bundle. Source: the repo's config/ template."""
     if getattr(sys, "frozen", False):
-        user_dir = os.path.join(
-            os.environ.get("APPDATA", os.path.expanduser("~")), "GnollGuard"
-        )
-        os.makedirs(user_dir, exist_ok=True)
-        user_path = os.path.join(user_dir, "settings.json")
-        if not os.path.exists(user_path):
-            bundled = os.path.join(sys._MEIPASS, "config", "settings.json")
-            if os.path.exists(bundled):
-                shutil.copy(bundled, user_path)
-        return user_path
+        return os.path.join(sys._MEIPASS, "config", "settings.json")
     return os.path.join(
         os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
         "config", "settings.json",
     )
+
+
+def _resolve_config_path() -> str:
+    r"""User settings ALWAYS live in %APPDATA%\GnollGuard\settings.json — per-user,
+    outside the repo and the install dir — for BOTH installed builds and dev/source
+    runs. This keeps personal values (the log path embeds a character name, plus
+    window positions, etc.) out of the shipped build and the git repo entirely.
+    The bundled config/settings.json is only a read-only template, copied here on
+    first run.
+    """
+    user_dir = os.path.join(
+        os.environ.get("APPDATA") or os.path.expanduser("~"), "GnollGuard"
+    )
+    os.makedirs(user_dir, exist_ok=True)
+    user_path = os.path.join(user_dir, "settings.json")
+    if not os.path.exists(user_path):
+        bundled = _bundled_config_path()
+        if os.path.exists(bundled):
+            shutil.copy(bundled, user_path)
+    return user_path
 
 
 def _migrate_legacy_dirs():
@@ -129,14 +137,7 @@ def _migrate_config(config: dict) -> dict:
     The APPDATA copy is only created on first run, so pattern fixes in new
     versions would never reach existing installs without this migration.
     """
-    bundled_path = None
-    if getattr(sys, "frozen", False):
-        bundled_path = os.path.join(sys._MEIPASS, "config", "settings.json")
-    else:
-        bundled_path = os.path.join(
-            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-            "config", "settings.json",
-        )
+    bundled_path = _bundled_config_path()
 
     try:
         with open(bundled_path, encoding="utf-8") as f:
