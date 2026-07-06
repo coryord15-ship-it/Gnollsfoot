@@ -44,14 +44,10 @@ jobs:
         run: |
           & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" /DAppVersion=${{ steps.ver.outputs.version }} /Q installer\GnollGuard.iss
 
-      - name: Upload build artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: GnollGuard-v${{ steps.ver.outputs.version }}
-          path: |
-            dist/GnollGuard.exe
-            installer/Output/GnollGuard-Setup.exe
-          retention-days: 30
+      # NOTE: no upload-artifact step — the two build outputs are published to the
+      # GitHub Release below (unlimited storage), so a separate Actions artifact would
+      # just duplicate them and eat the 0.5 GB Actions-storage quota. Re-add with a
+      # short retention-days if you ever need a pre-release debug artifact.
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
