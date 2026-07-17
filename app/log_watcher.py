@@ -1,12 +1,22 @@
 """
-Real-time log file tail.
+Real-time log file tail — watches EVERY character log in the EQ Logs folder.
 
-Uses watchdog for file-change notifications, then manually reads new bytes
-to handle partial lines safely (watchdog events fire mid-write).
-Dispatches parsed events to registered callbacks.
-The watcher runs on its own thread and is always live — never paused.
+EQL writes a separate log per character (eqlog_<Char>_<server>.txt), and a player
+switches characters without telling us. So instead of tailing one configured file,
+we watch the whole folder and tail every file matching the log glob (default
+eqlog_*.txt) — whichever character you play, its lines flow in automatically, and a
+brand-new character's log is picked up the moment it appears.
+
+Uses watchdog for file-change notifications, then manually reads new bytes to handle
+partial lines safely (watchdog events fire mid-write). Dispatches parsed events to
+registered callbacks. Runs on its own thread and is always live — never paused.
+
+Note: zone tracking is shared across files. Normal single-character play is fine;
+if two characters were logged at once (multiboxing) their zones could interleave —
+an acceptable trade for zero-config multi-character support.
 """
 
+import glob as _glob
 import logging
 import os
 import re
@@ -16,7 +26,7 @@ import time
 from datetime import datetime
 from typing import Callable, Optional
 
-from watchdog.events import FileModifiedEvent, FileSystemEventHandler
+from watchdog.events import FileCreatedEvent, FileModifiedEvent, FileSystemEventHandler
 from watchdog.observers import Observer
 
 from app.parsers.loot_parser import LootParser, LootEvent as LootEvt
@@ -29,10 +39,17 @@ log = logging.getLogger(__name__)
 class LogWatcher:
     def __init__(self, config: dict):
         self._config = config
+        # The folder to watch + the filename glob. Derived from log_file_path (existing
+        # config) or an explicit log_dir. glob defaults to every character log.
         self._path: Optional[str] = config.get("log_file_path") or None
+        self._dir: Optional[str] = config.get("log_dir") or (
+            os.path.dirname(self._path) if self._path else None)
+        self._glob: str = config.get("log_file_glob", "eqlog_*.txt")
         self._observer: Optional[Observer] = None
-        self._file = None
-        self._file_pos = 0
+        # Per-file tail state — we tail EVERY matching log at once.
+        self._files: dict[str, object] = {}      # path -> open handle
+        self._pos: dict[str, int] = {}           # path -> byte position
+        self._partial: dict[str, str] = {}       # path -> incomplete-line fragment
         self._lock = threading.Lock()
         self._running = False
 
@@ -79,61 +96,94 @@ class LogWatcher:
     # ── Lifecycle ────────────────────────────────────────────────────────────
 
     def start(self, path: Optional[str] = None):
+        # `path` (a single file) still works — we just watch its whole folder now.
         if path:
             self._path = path
-        if not self._path or not os.path.isfile(self._path):
+            self._dir = os.path.dirname(path)
+        if not self._dir or not os.path.isdir(self._dir):
             self.status = "error"
-            log.error("Log file not found: %s", self._path)
+            log.error("Log folder not found: %s", self._dir)
             return
 
-        self._open_file()
+        # Open every existing character log, seeking to the end (only new lines).
+        matches = self._matching_files()
+        for p in matches:
+            self._open_file(p, seek_end=True)
         self._observer = Observer()
-        handler = _FileHandler(self)
-        self._observer.schedule(handler, os.path.dirname(self._path), recursive=False)
+        self._observer.schedule(_FileHandler(self), self._dir, recursive=False)
         self._observer.start()
         self._running = True
         self.status = "watching"
-        log.info("Log watcher started: %s", self._path)
+        log.info("Log watcher started on %s (%d logs: %s)", self._dir, len(matches),
+                 ", ".join(os.path.basename(m) for m in matches) or "none yet")
 
     def stop(self):
         self._running = False
         if self._observer:
             self._observer.stop()
             self._observer.join()
-        if self._file:
-            self._file.close()
+        with self._lock:
+            for f in self._files.values():
+                try:
+                    f.close()
+                except Exception:
+                    pass
+            self._files.clear()
         self.status = "stopped"
+
+    def _matching_files(self) -> list[str]:
+        if not self._dir:
+            return []
+        return sorted(_glob.glob(os.path.join(self._dir, self._glob)))
+
+    def _is_match(self, path: str) -> bool:
+        return (self._dir is not None
+                and os.path.dirname(os.path.abspath(path)) == os.path.abspath(self._dir)
+                and _glob.fnmatch.fnmatch(os.path.basename(path), self._glob))
 
     @property
     def log_path(self) -> Optional[str]:
-        return self._path
+        """The most-recently-written matching log (for display + rotation targeting)."""
+        matches = self._matching_files()
+        if not matches:
+            return self._path
+        try:
+            return max(matches, key=os.path.getmtime)
+        except Exception:
+            return matches[0]
 
     def rotate_to(self, archive_dir: str) -> Optional[str]:
-        """Move the current log into archive_dir and drop our handle so EQ creates a
-        fresh log next launch. ONLY call when EQ is closed (no active writer) — moving
-        a file EQ holds open would fail or corrupt it. Returns the archive path, or
-        None if nothing was rotated. The watcher reopens the fresh log automatically."""
+        """Move EVERY matching character log into archive_dir and drop our handles so EQ
+        creates fresh logs next launch. ONLY call when EQ is closed (no active writer) —
+        moving a file EQ holds open would fail or corrupt it. Returns the archive path of
+        the last file moved, or None if nothing was rotated. Fresh logs are reopened
+        automatically as they appear."""
         with self._lock:
-            path = self._path
-            if not path or not os.path.exists(path):
+            matches = self._matching_files()
+            if not matches:
                 return None
-            if self._file:
-                self._file.close()
-                self._file = None
-            try:
-                os.makedirs(archive_dir, exist_ok=True)
-                stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                dest = os.path.join(archive_dir, f"{os.path.basename(path)}.{stamp}.bak")
-                shutil.move(path, dest)
-            except Exception:
-                log.exception("log rotation move failed")
-                if os.path.exists(path):
-                    self._open_file()
-                return None
-            self._file_pos = 0
-            self._partial_line = ""
-            log.info("Rotated log -> %s", dest)
-            return dest
+            stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            os.makedirs(archive_dir, exist_ok=True)
+            last_dest = None
+            for path in matches:
+                f = self._files.pop(path, None)
+                if f:
+                    try:
+                        f.close()
+                    except Exception:
+                        pass
+                self._pos.pop(path, None)
+                self._partial.pop(path, None)
+                try:
+                    dest = os.path.join(archive_dir, f"{os.path.basename(path)}.{stamp}.bak")
+                    shutil.move(path, dest)
+                    last_dest = dest
+                    log.info("Rotated log -> %s", dest)
+                except Exception:
+                    log.exception("log rotation move failed for %s", path)
+                    if os.path.exists(path):
+                        self._open_file(path)
+            return last_dest
 
     def reload_patterns(self, config: dict):
         """Hot-reload all patterns from updated config."""
@@ -157,36 +207,48 @@ class LogWatcher:
 
     # ── Internal ─────────────────────────────────────────────────────────────
 
-    def _open_file(self, seek_end: bool = True):
-        if self._file:
-            self._file.close()
-        self._file = open(self._path, "r", encoding="utf-8", errors="replace")
+    def _open_file(self, path: str, seek_end: bool = True):
+        """Open one log file for tailing and record its start position."""
+        old = self._files.get(path)
+        if old:
+            try:
+                old.close()
+            except Exception:
+                pass
+        f = open(path, "r", encoding="utf-8", errors="replace")
         if seek_end:
-            # Seek to end so we only process new lines (not the full history on launch)
-            self._file.seek(0, 2)
-        self._file_pos = self._file.tell()
+            f.seek(0, 2)   # only new lines, not the whole history, on first open
+        self._files[path] = f
+        self._pos[path] = f.tell()
+        self._partial.setdefault(path, "")
 
-    def _read_new_lines(self):
-        if not self._file:
-            # File may have just been recreated by EQ after a rotation — reopen from
-            # the start of the fresh log so we don't miss its first lines.
-            if self._path and os.path.exists(self._path):
-                self._open_file(seek_end=False)
-            else:
+    def _read_new_lines(self, path: str):
+        """Read and dispatch any new lines appended to one specific log file."""
+        if not self._is_match(path):
+            return
+        f = self._files.get(path)
+        if not f:
+            # A newly-created log (new character, or fresh log after rotation) — open
+            # from the START so we don't miss its first lines.
+            if os.path.exists(path):
+                self._open_file(path, seek_end=False)
+                f = self._files.get(path)
+            if not f:
                 return
         with self._lock:
-            self._file.seek(self._file_pos)
-            new_data = self._file.read()
-            self._file_pos = self._file.tell()
+            try:
+                f.seek(self._pos[path])
+                new_data = f.read()
+                self._pos[path] = f.tell()
+            except Exception:
+                return
 
         if not new_data:
             return
 
-        # Prepend any leftover fragment from the previous watchdog read, then
-        # hold the last element as a potential incomplete line until the next read.
-        new_data = self._partial_line + new_data
+        new_data = self._partial.get(path, "") + new_data
         lines = new_data.split("\n")
-        self._partial_line = lines[-1]  # "" if data ended with \n, else a fragment
+        self._partial[path] = lines[-1]   # "" if ended on \n, else an incomplete fragment
         for line in lines[:-1]:
             line = line.rstrip("\r")
             if not line:
@@ -250,7 +312,13 @@ class _FileHandler(FileSystemEventHandler):
         self._watcher = watcher
 
     def on_modified(self, event: FileModifiedEvent):
-        if not isinstance(event, FileModifiedEvent):
-            return
-        if os.path.abspath(event.src_path) == os.path.abspath(self._watcher._path):
-            self._watcher._read_new_lines()
+        if isinstance(event, FileModifiedEvent) and not event.is_directory:
+            if self._watcher._is_match(event.src_path):
+                self._watcher._read_new_lines(event.src_path)
+
+    def on_created(self, event: FileCreatedEvent):
+        # A new character's log (or a fresh log after rotation) just appeared — start
+        # tailing it from the beginning.
+        if isinstance(event, FileCreatedEvent) and not event.is_directory:
+            if self._watcher._is_match(event.src_path):
+                self._watcher._read_new_lines(event.src_path)
