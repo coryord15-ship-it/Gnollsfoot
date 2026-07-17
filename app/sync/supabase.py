@@ -234,6 +234,54 @@ class SupabaseSync:
             log.warning("remove_quest failed for %s: %s", quest_id, e)
             return False
 
+    def get_achievement_journal(self) -> list:
+        """The logged-in user's achievement journal — the sibling of get_journal().
+        RLS limits user_achievements to this user; achievements/achievement_steps are
+        public-read. Same authed-client path as get_journal so it stays reliable on
+        long sessions. Each returned achievement carries its ordered 'steps' list."""
+        if not self._client:
+            return []
+        try:
+            ua = self._client.table("user_achievements").select(
+                "achievement_id, status"
+            ).execute()
+            ids = [r["achievement_id"] for r in (ua.data or [])]
+            if not ids:
+                return []
+            achs = self._client.table("achievements").select(
+                "achievement_id, name, description, points, category, expansion"
+            ).in_("achievement_id", ids).execute()
+            steps = self._client.table("achievement_steps").select(
+                "achievement_id, step_order, description"
+            ).in_("achievement_id", ids).order("step_order").execute()
+            by_a: dict = {}
+            for s in (steps.data or []):
+                by_a.setdefault(s["achievement_id"], []).append(s)
+            out = []
+            for a in (achs.data or []):
+                d = dict(a)
+                d["steps"] = by_a.get(a["achievement_id"], [])
+                out.append(d)
+            return out
+        except Exception as e:
+            log.warning("get_achievement_journal failed: %s", e)
+            return []
+
+    def remove_achievement(self, achievement_id) -> bool:
+        """Remove an achievement from the logged-in user's journal (delete its
+        user_achievements row). RLS scopes the delete to this user."""
+        if not self._client or achievement_id is None:
+            return False
+        try:
+            self._client.table("user_achievements").delete().eq(
+                "achievement_id", achievement_id
+            ).execute()
+            log.info("Removed achievement %s from journal", achievement_id)
+            return True
+        except Exception as e:
+            log.warning("remove_achievement failed for %s: %s", achievement_id, e)
+            return False
+
     def ping(self) -> bool:
         """Quick connectivity check. Returns True if reachable."""
         if not self._client:
@@ -267,44 +315,6 @@ class SupabaseSync:
         except Exception as e:
             log.warning("Supabase pull failed: %s", e)
             return {}
-
-    def submit_auto_sold(self, rows: list) -> bool:
-        """Push a batch of auto-sold loot observations to the community via
-        /api/auto-sold (server attributes them to the user for distinct counts).
-        Each row: {item_name, tier, quantity, price_copper, sold_for_free,
-        drop_mob, drop_zone}. Requires login (Bearer token)."""
-        if not self._client or not self._auth_token or not rows:
-            return False
-        try:
-            import requests as _req
-            resp = _req.post(
-                "https://gnollguard.com/api/auto-sold",
-                json={"observations": rows},
-                headers=self._auth_headers(),
-                timeout=15,
-            )
-            if resp.status_code == 200:
-                log.info("Submitted %d auto-sold observations", len(rows))
-                return True
-            log.debug("submit_auto_sold HTTP %s: %s", resp.status_code, resp.text[:200])
-            return False
-        except Exception as e:
-            log.debug("submit_auto_sold failed: %s", e)
-            return False
-
-    def get_popular_items(self, limit: int = 50) -> list:
-        """Most-submitted community items (drives the Items → Popular Items tab).
-        Returns a list of {item_name, description, submission_count, drop_mob, drop_zone}."""
-        if not self._client:
-            return []
-        try:
-            res = self._client.table("community_items").select(
-                "item_name, description, submission_count, drop_mob, drop_zone"
-            ).order("submission_count", desc=True).limit(limit).execute()
-            return res.data or []
-        except Exception as e:
-            log.debug("get_popular_items failed: %s", e)
-            return []
 
     def pull_verified_data(self) -> dict:
         """Download community-verified items + NPCs on launch. Legacy method."""

@@ -45,7 +45,6 @@ class AuthManager:
         self._user: Optional[dict] = None
         self._access_token: Optional[str] = None
         self._on_auth_change: Optional[Callable] = None
-        self._preview_non_admin = False
 
     def _save_session(self, access_token: str, refresh_token: str, user: dict):
         try:
@@ -99,27 +98,6 @@ class AuthManager:
             or meta.get("user_name")
             or self._user.get("email")
         )
-
-    @property
-    def is_real_admin(self) -> bool:
-        if not self._user:
-            return False
-        return self._user.get("app_metadata", {}).get("role") == "admin"
-
-    @property
-    def is_admin(self) -> bool:
-        # Real admins can preview the non-admin (player) view via the header
-        # toggle — is_admin then reads False everywhere the UI/gating checks it.
-        return self.is_real_admin and not self._preview_non_admin
-
-    @property
-    def preview_non_admin(self) -> bool:
-        return self._preview_non_admin
-
-    def set_preview_non_admin(self, on: bool):
-        self._preview_non_admin = bool(on)
-        if self._on_auth_change:
-            self._on_auth_change()
 
     # ── Sign in ──────────────────────────────────────────────────────────────
 

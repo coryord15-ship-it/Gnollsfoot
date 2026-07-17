@@ -21,7 +21,7 @@ from watchdog.observers import Observer
 
 from app.parsers.loot_parser import LootParser, LootEvent as LootEvt
 from app.parsers.npc_parser import NPCParser, DialogueEvent
-from app.parsers.game_events import GameEventParser, TurnInEvent, AutoSoldEvent
+from app.parsers.game_events import GameEventParser, TurnInEvent
 
 log = logging.getLogger(__name__)
 
@@ -63,7 +63,6 @@ class LogWatcher:
         self._on_dialogue: list[Callable[[DialogueEvent], None]] = []
         self._on_turn_in: list[Callable[[TurnInEvent], None]] = []
         self._on_zone: list[Callable[[str], None]] = []
-        self._on_auto_sold: list[Callable[[AutoSoldEvent], None]] = []
         self._on_any_line: list[Callable[[], None]] = []  # for the silence timer
 
         self.status = "stopped"  # 'watching' | 'paused' | 'error' | 'stopped'
@@ -75,7 +74,6 @@ class LogWatcher:
     def on_dialogue(self, fn): self._on_dialogue.append(fn)
     def on_turn_in(self, fn): self._on_turn_in.append(fn)
     def on_zone(self, fn): self._on_zone.append(fn)
-    def on_auto_sold(self, fn): self._on_auto_sold.append(fn)
     def on_any_line(self, fn): self._on_any_line.append(fn)
 
     # ── Lifecycle ────────────────────────────────────────────────────────────
@@ -238,19 +236,13 @@ class LogWatcher:
                 except Exception: log.exception("on_dialogue callback error")
             return
 
-        # Quest turn-in + auto-sold loot — silent, feed the journal + item DB
+        # Quest turn-in — silent, feeds the journal
         turn_in = self._event_parser.parse_turn_in(line)
         if turn_in:
             for fn in self._on_turn_in:
                 try: fn(turn_in)
                 except Exception: log.exception("on_turn_in callback error")
             return
-
-        auto_sold = self._event_parser.parse_auto_sold(line)
-        if auto_sold:
-            for fn in self._on_auto_sold:
-                try: fn(auto_sold)
-                except Exception: log.exception("on_auto_sold callback error")
 
 
 class _FileHandler(FileSystemEventHandler):

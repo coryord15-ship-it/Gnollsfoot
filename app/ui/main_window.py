@@ -132,10 +132,9 @@ class MainWindow(ctk.CTk):
         # One content frame per section; build the existing tab content into each
         self._sections = {
             key: ctk.CTkFrame(self._content, fg_color=theme.BG, corner_radius=0)
-            for key in ("Recent Alerts", "Items", "Quest Journal", "Settings")
+            for key in ("Recent Alerts", "Quest Journal", "Settings")
         }
         self._build_alerts_tab(self._sections["Recent Alerts"])
-        self._build_items_tab(self._sections["Items"])
         self._build_questlog_tab(self._sections["Quest Journal"])
         self._settings_tab = SettingsTab(self._sections["Settings"], self._app)
         self._settings_tab.pack(fill="both", expand=True)
@@ -144,8 +143,7 @@ class MainWindow(ctk.CTk):
         self._nav_buttons = {}
         for key, label, icon in (
             ("Recent Alerts", "Alerts", "🔔"),
-            ("Items", "Items", "🎒"),
-            ("Quest Journal", "Quest Journal", "📖"),
+            ("Quest Journal", "Journal", "📖"),
             ("Settings", "Settings", "⚙"),
         ):
             btn = ctk.CTkButton(
@@ -194,17 +192,6 @@ class MainWindow(ctk.CTk):
                 self._auth_frame, text=f"⚔  {name}",
                 font=theme.FONT_BODY, text_color=theme.TEXT_PRIMARY,
             ).pack(side="left", padx=(0, theme.PAD_SM))
-            if self._app.auth.is_real_admin:
-                _vlabel = "View: Player" if self._app.auth.preview_non_admin else "View: Admin"
-                ctk.CTkButton(
-                    self._auth_frame, text=_vlabel, width=108,
-                    fg_color="transparent", text_color=theme.TEXT_SECONDARY,
-                    hover_color=theme.PANEL_HOVER, font=theme.FONT_BODY_SMALL,
-                    border_width=1, border_color=theme.BORDER,
-                    command=lambda: self._app.auth.set_preview_non_admin(
-                        not self._app.auth.preview_non_admin
-                    ),
-                ).pack(side="left", padx=(0, theme.PAD_SM))
             ctk.CTkButton(
                 self._auth_frame, text="Logout", width=64,
                 fg_color="transparent", text_color=theme.TEXT_MUTED,
@@ -287,10 +274,8 @@ class MainWindow(ctk.CTk):
                 btn.configure(fg_color=theme.PANEL_HOVER, text_color=theme.GOLD)
             else:
                 btn.configure(fg_color="transparent", text_color=theme.TEXT_SECONDARY)
-        if key == "Items":
-            self._refresh_items()
-        elif key == "Quest Journal":
-            self._refresh_journal()
+        if key == "Quest Journal":
+            self._refresh_active_journal()
 
     def _clear_alerts(self):
         for row in self._alert_rows:
@@ -302,20 +287,51 @@ class MainWindow(ctk.CTk):
     def _build_questlog_tab(self, parent):
         header = ctk.CTkFrame(parent, fg_color="transparent")
         header.pack(fill="x", padx=theme.PAD, pady=theme.PAD)
-        ctk.CTkLabel(
-            header, text="Your quest journal — added from the website",
-            font=theme.FONT_BODY, text_color=theme.TEXT_SECONDARY,
-        ).pack(side="left")
+        # Sub-tab toggle — Quests and Achievements both live in "the journal".
+        self._journal_subtab = "Quests"
+        self._journal_seg = ctk.CTkSegmentedButton(
+            header, values=["Quests", "Achievements"],
+            command=self._show_journal_subtab,
+            fg_color=theme.PANEL, selected_color=theme.PANEL_HOVER,
+            selected_hover_color=theme.PANEL_HOVER, unselected_color=theme.PANEL,
+            unselected_hover_color=theme.PANEL_HOVER,
+            text_color=theme.TEXT_PRIMARY, font=theme.FONT_BODY,
+        )
+        self._journal_seg.set("Quests")
+        self._journal_seg.pack(side="left")
         ctk.CTkButton(
             header, text="Refresh", width=80,
             fg_color=theme.PANEL, hover_color=theme.PANEL_HOVER,
             text_color=theme.TEXT_PRIMARY, font=theme.FONT_BODY,
-            command=self._refresh_journal,
+            command=self._refresh_active_journal,
         ).pack(side="right")
 
+        # Two scrollable lists; only the active sub-tab is packed at a time.
         self._journal_scroll = ctk.CTkScrollableFrame(parent, fg_color=theme.BG)
         self._journal_scroll.pack(fill="both", expand=True, padx=theme.PAD, pady=(0, theme.PAD))
         self._journal_widgets: list = []
+
+        self._ach_scroll = ctk.CTkScrollableFrame(parent, fg_color=theme.BG)
+        self._ach_widgets: list = []  # packed on demand by _show_journal_subtab
+
+    def _show_journal_subtab(self, name):
+        """Toggle the journal body between the Quests and Achievements lists."""
+        self._journal_subtab = name
+        if name == "Achievements":
+            self._journal_scroll.pack_forget()
+            self._ach_scroll.pack(fill="both", expand=True, padx=theme.PAD, pady=(0, theme.PAD))
+            self._refresh_achievements()
+        else:
+            self._ach_scroll.pack_forget()
+            self._journal_scroll.pack(fill="both", expand=True, padx=theme.PAD, pady=(0, theme.PAD))
+            self._refresh_journal()
+
+    def _refresh_active_journal(self):
+        """Refresh whichever journal sub-tab is currently showing."""
+        if getattr(self, "_journal_subtab", "Quests") == "Achievements":
+            self._refresh_achievements()
+        else:
+            self._refresh_journal()
 
     def _refresh_journal(self):
         for w in getattr(self, "_journal_widgets", []):
@@ -456,198 +472,112 @@ class MainWindow(ctk.CTk):
         ).start()
         self._refresh_journal()
 
-    # ── Items tab ─────────────────────────────────────────────────────────────
+    # ── Achievement journal sub-tab ───────────────────────────────────────────
+    # Mirrors the quest journal, but achievements aren't item-loot-based, so there's
+    # no loot->tick logic here — it's a saved, browsable checklist of their steps.
 
-    def _build_items_tab(self, parent):
-        search_row = ctk.CTkFrame(parent, fg_color="transparent")
-        search_row.pack(fill="x", padx=theme.PAD, pady=theme.PAD)
-        self._item_search_var = ctk.StringVar()
-        self._item_search_var.trace_add("write", lambda *_: self._refresh_items())
-        ctk.CTkEntry(
-            search_row, textvariable=self._item_search_var,
-            placeholder_text="Search items…",
-            fg_color=theme.PANEL, text_color=theme.TEXT_PRIMARY,
-            border_color=theme.BORDER, font=theme.FONT_BODY,
-        ).pack(side="left", fill="x", expand=True)
-
-        ctk.CTkButton(
-            search_row, text="Clear", width=64,
-            fg_color=theme.PANEL, text_color=theme.TEXT_SECONDARY,
-            hover_color=theme.DANGER, font=theme.FONT_BODY,
-            command=self._clear_items,
-        ).pack(side="right", padx=(theme.PAD_SM, 0))
-
-        self._items_filter_var = ctk.StringVar(value="Quest Items")
-        ctk.CTkSegmentedButton(
-            search_row,
-            values=["Quest Items", "Popular Items"],
-            variable=self._items_filter_var,
-            fg_color=theme.PANEL,
-            selected_color=theme.GOLD, selected_hover_color=theme.GREEN,
-            unselected_color=theme.PANEL, unselected_hover_color=theme.PANEL_HOVER,
-            text_color=theme.TEXT_PRIMARY, font=theme.FONT_BODY,
-            command=lambda _: self._refresh_items(),
-        ).pack(side="right", padx=(theme.PAD, 0))
-
-        self._items_scroll = ctk.CTkScrollableFrame(
-            parent, fg_color=theme.BG,
-        )
-        self._items_scroll.pack(fill="both", expand=True, padx=theme.PAD, pady=(0, theme.PAD))
-        self._item_row_widgets: list = []
-
-    _AUTOSOLD_FALLBACK = "Early gear, not useful past level 10."
-
-    def _refresh_items(self):
-        for w in self._item_row_widgets:
+    def _refresh_achievements(self):
+        for w in getattr(self, "_ach_widgets", []):
             w.destroy()
-        self._item_row_widgets.clear()
+        self._ach_widgets = []
 
-        query = self._item_search_var.get().lower()
-        filt = getattr(self, "_items_filter_var", None)
-        filt = filt.get() if filt else "Quest Items"
-
-        if filt == "Popular Items":
-            self._items_msg("Loading popular items…")
-            def load():
-                try:
-                    items = self._app.supabase.get_popular_items()
-                except Exception as e:
-                    log.debug("popular items load failed: %s", e)
-                    items = []
-                self.after(0, lambda: self._render_popular_items(items, query))
-            threading.Thread(target=load, daemon=True).start()
-        else:
-            self._render_quest_items(query)
-
-    def _items_msg(self, text):
-        for w in self._item_row_widgets:
-            w.destroy()
-        self._item_row_widgets.clear()
-        lbl = ctk.CTkLabel(
-            self._items_scroll, text=text,
-            font=theme.FONT_BODY, text_color=theme.TEXT_MUTED,
-            anchor="w", justify="left", wraplength=700, fg_color="transparent",
-        )
-        lbl.pack(anchor="w", padx=theme.PAD, pady=theme.PAD * 2)
-        self._item_row_widgets.append(lbl)
-
-    # ── Quest Items ───────────────────────────────────────────────────────────
-
-    def _render_quest_items(self, query: str):
-        for w in self._item_row_widgets:
-            w.destroy()
-        self._item_row_widgets.clear()
-        from app import quest_progress
-        quests = getattr(self._app, "_journal_quests", []) or []
-        prog = getattr(self._app, "_quest_progress", set())
-        given = getattr(self._app, "_quest_given", set())
-        sold = getattr(self._app, "_sold_items", set())
-        seen, shown = set(), 0
-        for q in quests:
-            qn = q.get("quest_name", "Quest")
-            for it in sorted(quest_progress.required_items(q)):
-                if it in seen:
-                    continue
-                seen.add(it)
-                if query and query not in it:
-                    continue
-                self._render_quest_item_row(it, qn, prog, given, sold)
-                shown += 1
-        if shown == 0:
-            self._items_msg(
-                "No quest items yet.\n"
-                "Add quests to your Journal at gnollguard.com/quests — their required "
-                "items appear here and tick off as you loot and turn them in."
-            )
-
-    def _render_quest_item_row(self, item_name, quest_name, prog, given, sold):
-        low = item_name.lower()
-        if low in given:
-            status, col = "✔ Turned in", theme.GREEN
-        elif low in prog:
-            status, col = "✓ Looted", theme.GOLD
-        else:
-            status, col = "○ Needed", theme.TEXT_SECONDARY
-        row = ctk.CTkFrame(self._items_scroll, fg_color=theme.PANEL,
-                           corner_radius=theme.RADIUS, border_width=1, border_color=col)
-        row.pack(fill="x", pady=2)
-        left = ctk.CTkFrame(row, fg_color="transparent")
-        left.pack(side="left", fill="x", expand=True, padx=theme.PAD, pady=theme.PAD_SM)
-        title = item_name.title() if item_name.islower() else item_name
-        ctk.CTkLabel(left, text=title, font=theme.FONT_BODY,
-                     text_color=theme.TEXT_PRIMARY, anchor="w").pack(anchor="w")
-        sub = f"for “{quest_name}”"
-        if low in sold:
-            sub += "   ·   ⚠ Frequently Auto-Sold"
-        ctk.CTkLabel(left, text=sub, font=theme.FONT_BODY_SMALL,
-                     text_color=theme.TEXT_MUTED, anchor="w").pack(anchor="w")
-        ctk.CTkLabel(row, text=status, font=theme.FONT_BODY_SMALL, text_color=col,
-                     anchor="e").pack(side="right", padx=(theme.PAD_SM, theme.PAD))
-        self._item_row_widgets.append(row)
-
-    # ── Popular Items ─────────────────────────────────────────────────────────
-
-    def _render_popular_items(self, items, query: str):
-        for w in self._item_row_widgets:
-            w.destroy()
-        self._item_row_widgets.clear()
-        sold = getattr(self._app, "_sold_items", set())
-        shown = 0
-        for it in (items or []):
-            name = (it.get("item_name") or "").strip()
-            if not name:
-                continue
-            if query and query not in name.lower():
-                continue
-            self._render_popular_item_row(it, sold)
-            shown += 1
-        if shown == 0:
-            self._items_msg("No popular items to show yet.")
-
-    def _render_popular_item_row(self, it, sold):
-        name = it.get("item_name", "")
-        desc = (it.get("description") or "").strip() or self._AUTOSOLD_FALLBACK
-        count = it.get("submission_count") or 0
-        row = ctk.CTkFrame(self._items_scroll, fg_color=theme.PANEL,
-                           corner_radius=theme.RADIUS, border_width=1, border_color=theme.BORDER)
-        row.pack(fill="x", pady=2)
-        left = ctk.CTkFrame(row, fg_color="transparent")
-        left.pack(side="left", fill="x", expand=True, padx=theme.PAD, pady=theme.PAD_SM)
-        head = name + ("   ·   ⚠ Frequently Auto-Sold" if name.lower() in sold else "")
-        ctk.CTkLabel(left, text=head, font=theme.FONT_BODY,
-                     text_color=theme.TEXT_PRIMARY, anchor="w").pack(anchor="w")
-        ctk.CTkLabel(left, text=desc[:140], font=theme.FONT_BODY_SMALL,
-                     text_color=theme.TEXT_SECONDARY, anchor="w",
-                     justify="left", wraplength=620).pack(anchor="w")
-        if count:
-            ctk.CTkLabel(row, text=f"{count}×", font=theme.FONT_BODY_SMALL,
-                         text_color=theme.GOLD).pack(side="right", padx=(theme.PAD_SM, theme.PAD))
-        self._item_row_widgets.append(row)
-
-    def _clear_items(self):
-        """Wipe the local items the app has accumulated this session + clear the view."""
-        import tkinter.messagebox as _mb
-        if not _mb.askyesno("Clear items",
-                            "Clear the local items the app has collected this session?",
-                            parent=self):
+        if not self._app.auth.is_logged_in:
+            self._ach_journal_msg("Log in with Discord (top right) to use your journal.")
             return
-        def _do():
-            try:
-                from app.db.queries import list_items, delete_item
-                for item in list_items(self._app.db_session):
-                    try:
-                        delete_item(self._app.db_session, item.name, getattr(item, "item_level", 0))
-                    except Exception:
-                        pass
-            except Exception:
-                log.debug("clear items failed", exc_info=True)
-            self.after(0, self._refresh_items)
-        try:
-            getattr(self._app, "_sold_items", set()).clear()
-        except Exception:
-            pass
-        threading.Thread(target=_do, daemon=True).start()
-        self._items_msg("Cleared.")
+
+        self._ach_journal_msg("Loading your achievements…")
+        def load():
+            achs = self._app.supabase.get_achievement_journal()
+            self.after(0, lambda: self._render_achievement_journal(achs))
+        threading.Thread(target=load, daemon=True).start()
+
+    def _ach_journal_msg(self, text):
+        lbl = ctk.CTkLabel(
+            self._ach_scroll, text=text, justify="left",
+            font=theme.FONT_BODY, text_color=theme.TEXT_SECONDARY,
+        )
+        lbl.pack(anchor="w", padx=theme.PAD, pady=theme.PAD)
+        self._ach_widgets.append(lbl)
+
+    def _render_achievement_journal(self, achs):
+        for w in self._ach_widgets:
+            w.destroy()
+        self._ach_widgets = []
+
+        if not achs:
+            self._ach_journal_msg(
+                "No achievements in your journal yet.\n"
+                "Browse gnollguard.com/achievements and click “Add to Journal.”"
+            )
+            return
+
+        for a in achs:
+            self._render_journal_achievement(a)
+
+    def _render_journal_achievement(self, a):
+        card = ctk.CTkFrame(self._ach_scroll, fg_color=theme.PANEL, corner_radius=8)
+        card.pack(fill="x", padx=theme.PAD, pady=4)
+
+        title_row = ctk.CTkFrame(card, fg_color="transparent")
+        title_row.pack(fill="x", padx=theme.PAD, pady=(theme.PAD_SM, 0))
+        ctk.CTkLabel(
+            title_row, text=a.get("name", "Achievement"), font=theme.FONT_SUBHEADER,
+            text_color=theme.GOLD, anchor="w",
+        ).pack(side="left")
+        ctk.CTkButton(
+            title_row, text="🗑", width=30, height=26,
+            fg_color="transparent", text_color=theme.TEXT_MUTED,
+            hover_color=theme.DANGER, font=theme.FONT_BODY,
+            command=lambda aa=a: self._delete_achievement(aa),
+        ).pack(side="right")
+
+        meta = []
+        if a.get("category"):
+            meta.append(a["category"])
+        if a.get("points"):
+            meta.append(f"{a['points']} pts")
+        if meta:
+            ctk.CTkLabel(
+                card, text="  •  ".join(meta), font=theme.FONT_BODY_SMALL,
+                text_color=theme.TEXT_SECONDARY, anchor="w",
+            ).pack(anchor="w", padx=theme.PAD)
+        if a.get("description"):
+            ctk.CTkLabel(
+                card, text=a["description"], font=theme.FONT_BODY_SMALL,
+                text_color=theme.TEXT_PRIMARY, anchor="w", justify="left", wraplength=460,
+            ).pack(anchor="w", padx=theme.PAD, pady=(theme.PAD_SM, 0))
+
+        # Steps as a numbered checklist. Some achievements have 100+ components, so
+        # cap the rendered rows to keep the HUD snappy and show a "+N more" pointer.
+        steps = sorted(a.get("steps", []) or [], key=lambda s: s.get("step_order", 0))
+        MAX_STEPS = 40
+        for i, s in enumerate(steps[:MAX_STEPS], 1):
+            desc = s.get("description") or ""
+            ctk.CTkLabel(
+                card, text=f"  {i}. {desc}", font=theme.FONT_BODY_SMALL,
+                text_color=theme.TEXT_SECONDARY, anchor="w", justify="left", wraplength=460,
+            ).pack(anchor="w", padx=theme.PAD, pady=(1, 0))
+        if len(steps) > MAX_STEPS:
+            ctk.CTkLabel(
+                card, text=f"  +{len(steps) - MAX_STEPS} more — see gnollguard.com/achievements",
+                font=theme.FONT_BODY_SMALL, text_color=theme.TEXT_MUTED, anchor="w",
+            ).pack(anchor="w", padx=theme.PAD, pady=(1, 0))
+
+        ctk.CTkLabel(card, text="", font=theme.FONT_BODY_SMALL).pack(pady=(0, theme.PAD_SM))
+        self._ach_widgets.append(card)
+
+    def _delete_achievement(self, a):
+        """Trashcan: remove this achievement from the journal (local + Supabase)."""
+        import tkinter.messagebox as _mb
+        name = a.get("name", "this achievement")
+        if not _mb.askyesno("Remove achievement",
+                            f"Remove “{name}” from your journal?", parent=self):
+            return
+        aid = a.get("achievement_id")
+        threading.Thread(
+            target=lambda: self._app.supabase.remove_achievement(aid), daemon=True
+        ).start()
+        self._refresh_achievements()
 
     # ── Status bar updates ────────────────────────────────────────────────────
 

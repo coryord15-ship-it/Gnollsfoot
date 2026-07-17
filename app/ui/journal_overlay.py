@@ -1,20 +1,25 @@
 """
-Gnoll Guard overlay — a single always-on-top window that IS the app (no popups).
+Gnoll Guard overlay — minimal always-on-top HUD for your Quest Journal.
 
-Tabs:
-  • Journal        — the player's journaled quests; required items tick off (✓) as looted
-  • Popular Quests — most-added quests across the community (web /api/quests/popular)
-  • Quests in Zone — quests for the zone you just entered (web /api/quests/by-zone)
-  • Settings       — log path, audio, etc.
+ONE view: your journaled quests as a live checklist. Each required item ticks off
+(○ needed → ✓ looted → ✔ turned in) as you play, driven by the log watcher via
+main.py callbacks. Quests for the zone you're in float to the top; other known
+quests in that zone show at the bottom (web /api/quests/by-zone).
 
-Status bar shows the log-watcher state. All network reads run on background threads
-and render via .after(); the loot/zone updates arrive from main.py callbacks.
+Rebuilt 2026-07-09 minimal: dropped the tab-view, the "Popular" tab (that's the
+website's job), and the per-frame click-through poll — the fragile Windows
+ex-style toggling that could flicker/vanish the window (and is the same family as
+the old shell-freeze). Kept: always-on-top, opacity, drag-by-header, save-position.
+No popups; this window IS the overlay.
+
+Public API used by main.py / MainWindow (unchanged): refresh_journal(), update_zone(zone).
 """
 
 import logging
 import os
 import sys
 import threading
+import urllib.parse
 
 import customtkinter as ctk
 from PIL import Image
@@ -40,32 +45,28 @@ def _asset(*parts) -> str:
 
 
 class JournalOverlay(ctk.CTkToplevel):
-    """Detached, always-on-top quest overlay tied to the main app (a child window,
-    toggled from Settings → 'Enable Overlay Window')."""
-    # Quest-focused HUD. Settings/Items live in the main window, not here.
-    TABS = [
-        ("journal", "📖  Journal"),
-        ("popular", "🔥  Popular"),
-        ("zone",    "🗺  In Zone"),
-    ]
+    """Detached always-on-top quest HUD, toggled from Settings → 'Enable Overlay Window'.
+    A child of the main window; closing it just flips overlay_enabled off (the main app
+    keeps running). One scrollable view — no tabs, no click-through timer."""
 
     def __init__(self, master, app_state):
         super().__init__(master, fg_color=theme.BG)
         self._app = app_state
-        from app.version import __version__
         self.title("Gnoll Guard")
 
-        cfg_win = self._app.config.get("window", {})
-        w = cfg_win.get("overlay_width", 360)
-        h = cfg_win.get("overlay_height", 540)
+        self._current_zone = None
+        self._quests: list = []        # the player's journaled quests
+        self._zone_quests: list = []   # other known quests in the current zone
+        self._rows: list = []          # rendered widgets (cleared on each render)
+
+        # ── placement: spawn under the cursor (the active monitor), clamped to the
+        # virtual desktop so a saved off-screen spot can never hide it. ──────────
+        # Fixed LOGICAL open size — never restore a saved WxH. CustomTkinter multiplies
+        # geometry() by the display's DPI scaling, while winfo_width() returns the ALREADY
+        # scaled pixels; saving that and feeding it back re-scales every launch
+        # (360→720→1080→3240…), which balloons the window on HiDPI. A fixed size breaks it.
+        w, h = 360, 540
         self.minsize(300, 380)
-        # Place at the saved spot only if it's actually on the primary screen;
-        # otherwise default to the top-right (a classic HUD position) so the
-        # overlay is never lost off-screen / on a disconnected monitor.
-        # Multi-monitor: the Windows "primary" monitor may not be the screen the user
-        # is looking at, so ALWAYS spawn the overlay under the mouse cursor (the
-        # active monitor), clamped to the virtual desktop. This guarantees it appears
-        # where the user is — "remembering" an off-screen spot is what hid it before.
         vx, vy = self.winfo_vrootx(), self.winfo_vrooty()
         vw, vh = self.winfo_vrootwidth(), self.winfo_vrootheight()
         px, py = self.winfo_pointerx(), self.winfo_pointery()
@@ -73,274 +74,228 @@ class JournalOverlay(ctk.CTkToplevel):
         gy = min(max(py - 30, vy), vy + vh - h)
         self.geometry(f"{w}x{h}+{gx}+{gy}")
 
-        # Always-on-top overlay + transparency so it blends over the game.
-        # Borderless drops the OS title bar for a true HUD look (drag via header).
-        self._borderless = bool(self._app.config.get("overlay_borderless", False))
         try:
             self.attributes("-topmost", bool(self._app.config.get("overlay_topmost", True)))
             self.attributes("-alpha", float(self._app.config.get("overlay_opacity", 0.92)))
-            if self._borderless:
-                self.overrideredirect(True)
+            if bool(self._app.config.get("overlay_borderless", False)):
+                self.overrideredirect(True)   # frameless HUD; drag via the header
         except Exception:
             pass
 
         self.protocol("WM_DELETE_WINDOW", self._on_close)
-
-        ico, png = _asset("icon.ico"), _asset("icon.png")
+        ico = _asset("icon.ico")
         try:
             if os.path.isfile(ico):
                 self.iconbitmap(ico)
-            elif os.path.isfile(png):
-                self.iconphoto(True, ctk.CTkImage(Image.open(png))._light_image)
+                self.after(300, lambda: self._safe(lambda: self.iconbitmap(ico)))
         except Exception:
             pass
-        # Re-apply after CTk's delayed icon reset (avoids the default blue square).
-        if os.path.isfile(ico):
-            self.after(300, lambda: self._safe_iconbitmap(ico))
 
-        self._version = __version__
-        self._current_zone = None
-        self._popular_loaded = False
-        # Click-through state (Windows-only, safe-by-construction — see _ct_* below)
-        self._ct_hwnd = None    # our OWN validated top-level hwnd, cached
-        self._ct_on = False     # current click-through state
-        self._ct_dead = False   # True once we've decided it's unavailable/unsafe
         self._build()
-        # Pull the overlay to the front shortly after launch so it's never hidden.
+        self.refresh_journal()
         self.after(200, self._surface)
-        # Click-through watcher — only starts touching window styles after the
-        # window is realized, and only ever on our own process's window.
-        self.after(700, self._ct_poll)
+
+    # ── small helpers ───────────────────────────────────────────────────────────
+    def _safe(self, fn):
+        try:
+            fn()
+        except Exception:
+            pass
 
     def _surface(self):
-        try:
+        """Raise above the (possibly fullscreen) game; blink -topmost so Windows obeys."""
+        def _do():
             self.deiconify()
             self.lift()
             self.attributes("-topmost", bool(self._app.config.get("overlay_topmost", True)))
-            self.focus_force()
-            log.info("overlay geometry=%s screen=%dx%d vroot=%dx%d",
-                     self.geometry(), self.winfo_screenwidth(), self.winfo_screenheight(),
-                     self.winfo_vrootwidth(), self.winfo_vrootheight())
-            # blink topmost so Windows reliably raises it above a fullscreen game
-            self.after(400, lambda: self.attributes("-topmost", True))
-        except Exception:
-            pass
+            self.after(400, lambda: self._safe(lambda: self.attributes("-topmost", True)))
+        self._safe(_do)
 
     def _save_geometry(self):
-        try:
+        # Persist POSITION only — never the size. Saving the DPI-scaled winfo size and
+        # restoring it via geometry() compounds the scale each launch (see __init__).
+        def _do():
             win = self._app.config.setdefault("window", {})
-            win["overlay_x"] = self.winfo_x()
-            win["overlay_y"] = self.winfo_y()
-            win["overlay_width"] = self.winfo_width()
-            win["overlay_height"] = self.winfo_height()
+            win["overlay_x"], win["overlay_y"] = self.winfo_x(), self.winfo_y()
             self._app.save_config()
-        except Exception:
-            pass
+        self._safe(_do)
 
-    def _safe_iconbitmap(self, ico):
-        try:
-            self.iconbitmap(ico)
-        except Exception:
-            pass
+    # ── drag (via header) + resize (via footer grip) ─────────────────────────────
+    def _drag_start(self, e):
+        self._drag_off = (e.x_root - self.winfo_x(), e.y_root - self.winfo_y())
 
-    def _drag_start(self, event):
-        self._dragging = True
-        self._drag_off = (event.x_root - self.winfo_x(), event.y_root - self.winfo_y())
-
-    def _drag_move(self, event):
+    def _drag_move(self, e):
         off = getattr(self, "_drag_off", None)
         if off:
-            self.geometry(f"+{event.x_root - off[0]}+{event.y_root - off[1]}")
+            self.geometry(f"+{e.x_root - off[0]}+{e.y_root - off[1]}")
 
-    def _drag_end(self, event):
-        self._dragging = False
+    def _resize_start(self, e):
+        self._resize_off = (e.x_root, e.y_root, self.winfo_width(), self.winfo_height())
 
-    def _resize_start(self, event):
-        self._resize_off = (event.x_root, event.y_root, self.winfo_width(), self.winfo_height())
-
-    def _resize_move(self, event):
+    def _resize_move(self, e):
         o = getattr(self, "_resize_off", None)
         if not o:
             return
         sx, sy, sw, sh = o
-        w = max(300, sw + (event.x_root - sx))   # clamp to minsize (300x380)
-        h = max(380, sh + (event.y_root - sy))
-        self.geometry(f"{w}x{h}")
+        self.geometry(f"{max(300, sw + e.x_root - sx)}x{max(380, sh + e.y_root - sy)}")
 
-    # ── Layout ────────────────────────────────────────────────────────────────
-
+    # ── layout ───────────────────────────────────────────────────────────────────
     def _build(self):
-        # Header: logo + auth
-        hdr = ctk.CTkFrame(self, fg_color=theme.PANEL, height=36, corner_radius=0)
+        # Header — title + refresh/close, and the drag grab-zone.
+        hdr = ctk.CTkFrame(self, fg_color=theme.PANEL, height=38, corner_radius=0)
         hdr.pack(fill="x")
         hdr.pack_propagate(False)
-        self._ct_grab = hdr   # header = always-solid grab zone (never click-through)
         try:
-            _icon = ctk.CTkImage(Image.open(_asset("icon.png")), size=(20, 20))
-            ctk.CTkLabel(hdr, image=_icon, text="").pack(side="left", padx=(theme.PAD, theme.PAD_SM))
+            img = ctk.CTkImage(Image.open(_asset("icon.png")), size=(18, 18))
+            ctk.CTkLabel(hdr, image=img, text="").pack(side="left", padx=(theme.PAD, 4))
         except Exception:
             pass
-        _title = ctk.CTkLabel(hdr, text="GNOLL GUARD", font=theme.FONT_HEADER, text_color=theme.GOLD)
-        _title.pack(side="left")
-        # Slim title bar: a close button (works when borderless) + drag-to-move.
-        ctk.CTkButton(
-            hdr, text="✕", width=24, height=22, fg_color="transparent",
-            text_color=theme.TEXT_MUTED, hover_color=theme.DANGER, font=theme.FONT_BODY,
-            command=self._on_close,
-        ).pack(side="right", padx=(0, theme.PAD_SM))
-        for _w in (hdr, _title):
-            _w.bind("<ButtonPress-1>", self._drag_start)
-            _w.bind("<B1-Motion>", self._drag_move)
-            _w.bind("<ButtonRelease-1>", self._drag_end)
-        self._auth_frame = ctk.CTkFrame(hdr, fg_color="transparent")
-        self._auth_frame.pack(side="right", padx=theme.PAD)
-        self._refresh_auth_header()
+        title = ctk.CTkLabel(hdr, text="Quest Journal", font=theme.FONT_SUBHEADER,
+                             text_color=theme.GOLD)
+        title.pack(side="left")
+        for grab in (hdr, title):                      # drag from the header or its title
+            grab.bind("<Button-1>", self._drag_start)
+            grab.bind("<B1-Motion>", self._drag_move)
+        ctk.CTkButton(hdr, text="✕", width=28, height=26, fg_color="transparent",
+                      text_color=theme.TEXT_MUTED, hover_color=theme.DANGER,
+                      font=theme.FONT_BODY, command=self._on_close).pack(side="right", padx=(0, 4))
+        ctk.CTkButton(hdr, text="⟳", width=28, height=26, fg_color="transparent",
+                      text_color=theme.TEXT_SECONDARY, hover_color=theme.PANEL_HOVER,
+                      font=theme.FONT_BODY, command=self.refresh_journal).pack(side="right")
 
-        # Tab bar
-        tabbar = ctk.CTkFrame(self, fg_color=theme.PANEL, height=30, corner_radius=0)
-        tabbar.pack(fill="x")
-        tabbar.pack_propagate(False)
-        self._tab_buttons = {}
-        for key, label in self.TABS:
-            b = ctk.CTkButton(
-                tabbar, text=label, anchor="center",
-                fg_color="transparent", text_color=theme.TEXT_SECONDARY,
-                hover_color=theme.PANEL_HOVER, font=theme.FONT_BODY,
-                corner_radius=0, command=lambda k=key: self._show(k),
-            )
-            b.pack(side="left", fill="both", expand=True)
-            self._tab_buttons[key] = b
+        # Zone indicator (updated by update_zone).
+        self._zone_lbl = ctk.CTkLabel(self, text="", font=theme.FONT_BODY_SMALL,
+                                      text_color=theme.TEXT_MUTED, anchor="w")
+        self._zone_lbl.pack(fill="x", padx=theme.PAD, pady=(4, 0))
 
-        # Content
-        self._content = ctk.CTkFrame(self, fg_color=theme.BG, corner_radius=0)
-        self._content.pack(fill="both", expand=True)
-        self._sections = {k: ctk.CTkFrame(self._content, fg_color=theme.BG, corner_radius=0) for k, _ in self.TABS}
+        # Body — the one scrollable quest list.
+        self._scroll = ctk.CTkScrollableFrame(self, fg_color=theme.BG)
+        self._scroll.pack(fill="both", expand=True, padx=theme.PAD, pady=(4, 0))
 
-        self._build_journal_tab(self._sections["journal"])
-        self._build_popular_tab(self._sections["popular"])
-        self._build_zone_tab(self._sections["zone"])
-
-        # Status bar
-        sb = ctk.CTkFrame(self, fg_color=theme.PANEL, height=22, corner_radius=0)
-        sb.pack(fill="x", side="bottom")
-        sb.pack_propagate(False)
-        self._log_light = ctk.CTkLabel(sb, text="●", font=("Segoe UI", 13),
+        # Footer — log-watcher light + status + resize grip.
+        foot = ctk.CTkFrame(self, fg_color=theme.PANEL, height=24, corner_radius=0)
+        foot.pack(fill="x")
+        foot.pack_propagate(False)
+        self._log_light = ctk.CTkLabel(foot, text="●", font=theme.FONT_BODY_SMALL,
                                        text_color=theme.STATUS_LOG_DISCONNECTED)
-        self._log_light.pack(side="left", padx=(theme.PAD, 2))
-        self._watcher_label = ctk.CTkLabel(sb, text="Log: not connected",
-                                           font=theme.FONT_BODY_SMALL, text_color=theme.TEXT_SECONDARY)
-        self._watcher_label.pack(side="left")
-        self._sync_label = ctk.CTkLabel(sb, text="", font=theme.FONT_BODY_SMALL, text_color=theme.TEXT_MUTED)
-        self._sync_label.pack(side="right", padx=theme.PAD)
+        self._log_light.pack(side="left", padx=(theme.PAD, 4))
+        self._status_lbl = ctk.CTkLabel(foot, text="starting…", font=theme.FONT_BODY_SMALL,
+                                        text_color=theme.TEXT_MUTED)
+        self._status_lbl.pack(side="left")
+        grip = ctk.CTkLabel(foot, text="◢", font=theme.FONT_BODY_SMALL, text_color=theme.TEXT_MUTED)
+        grip.pack(side="right", padx=theme.PAD)
+        grip.bind("<Button-1>", self._resize_start)
+        grip.bind("<B1-Motion>", self._resize_move)
 
-        # Resize grip (bottom-right) — needed because the borderless overlay has no
-        # OS resize border. Drag it to resize.
-        self._grip = ctk.CTkLabel(self, text="◢", font=("Segoe UI", 12),
-                                  text_color=theme.TEXT_MUTED, cursor="size_nw_se")
-        self._grip.place(relx=1.0, rely=1.0, anchor="se", x=-2, y=-2)
-        self._grip.bind("<ButtonPress-1>", self._resize_start)
-        self._grip.bind("<B1-Motion>", self._resize_move)
-
-        self._active = None
-        self._show("journal")
-
-    def _show(self, key):
-        if key == self._active:
-            return
-        for f in self._sections.values():
-            f.pack_forget()
-        self._sections[key].pack(fill="both", expand=True)
-        self._active = key
-        for k, b in self._tab_buttons.items():
-            b.configure(fg_color=theme.PANEL_HOVER if k == key else "transparent",
-                        text_color=theme.GOLD if k == key else theme.TEXT_SECONDARY)
-        if key == "journal":
-            self.refresh_journal()
-        elif key == "popular" and not self._popular_loaded:
-            self.refresh_popular()
-
-    # ── Auth header ─────────────────────────────────────────────────────────--
-
-    def _refresh_auth_header(self):
-        for w in self._auth_frame.winfo_children():
-            w.destroy()
-        auth = self._app.auth
-        if auth.is_logged_in:
-            ctk.CTkLabel(self._auth_frame, text=f"⚔ {auth.username or 'Adventurer'}",
-                         font=theme.FONT_BODY_SMALL, text_color=theme.TEXT_PRIMARY).pack(side="left", padx=(0, theme.PAD_SM))
-            ctk.CTkButton(self._auth_frame, text="Logout", width=58,
-                          fg_color="transparent", text_color=theme.TEXT_MUTED,
-                          hover_color=theme.PANEL_HOVER, font=theme.FONT_BODY_SMALL,
-                          border_width=1, border_color=theme.BORDER,
-                          command=lambda: auth.sign_out()).pack(side="left")
-        else:
-            ctk.CTkButton(self._auth_frame, text="Login with Discord", width=140,
-                          fg_color="#5865F2", text_color="#FFFFFF", hover_color="#4752C4",
-                          font=theme.FONT_BODY_SMALL,
-                          command=lambda: auth.sign_in_discord()).pack(side="left")
-
-    # ── Journal tab ─────────────────────────────────────────────────────────--
-
-    def _build_journal_tab(self, parent):
-        head = ctk.CTkFrame(parent, fg_color="transparent")
-        head.pack(fill="x", padx=theme.PAD, pady=theme.PAD_SM)
-        ctk.CTkLabel(head, text="Your quest journal", font=theme.FONT_BODY,
-                     text_color=theme.TEXT_SECONDARY).pack(side="left")
-        ctk.CTkButton(head, text="Refresh", width=72, fg_color=theme.PANEL,
-                      hover_color=theme.PANEL_HOVER, text_color=theme.TEXT_PRIMARY,
-                      font=theme.FONT_BODY_SMALL, command=self.refresh_journal).pack(side="right")
-        self._journal_scroll = ctk.CTkScrollableFrame(parent, fg_color=theme.BG)
-        self._journal_scroll.pack(fill="both", expand=True, padx=theme.PAD, pady=(0, theme.PAD))
-        self._journal_widgets: list = []
-
+    # ── data: journal ─────────────────────────────────────────────────────────
     def refresh_journal(self):
-        for w in getattr(self, "_journal_widgets", []):
-            w.destroy()
-        self._journal_widgets = []
+        """(Public — called by main.py on loot/turn-in and by the ⟳ button.)
+        Reloads the player's journaled quests from Supabase and re-renders."""
         if not self._app.auth.is_logged_in:
-            self._journal_msg("Log in with Discord (top right) to use your Quest Journal.\n"
-                              "Add quests at gnollguard.com/quests → “Add to Journal.”")
+            self._quests = []
+            self._render(msg="Log in with Discord in the main window to use your Quest Journal.\n\n"
+                             "Add quests at gnollguard.com/quests → “Add to Journal.”")
             return
-        self._journal_msg("Loading your journal…")
+        self._render(msg="Loading your journal…")
 
         def load():
-            quests = self._app.supabase.get_journal()
-            self.after(0, lambda: self._render_journal(quests))
+            try:
+                quests = self._app.supabase.get_journal() or []
+            except Exception:
+                log.debug("journal load failed", exc_info=True)
+                quests = []
+            self.after(0, lambda: self._set_quests(quests))
         threading.Thread(target=load, daemon=True).start()
 
-    def _journal_msg(self, text):
-        lbl = ctk.CTkLabel(self._journal_scroll, text=text, justify="left",
-                           font=theme.FONT_BODY, text_color=theme.TEXT_SECONDARY, wraplength=410)
-        lbl.pack(anchor="w", padx=theme.PAD, pady=theme.PAD)
-        self._journal_widgets.append(lbl)
-
-    def _render_journal(self, quests):
-        for w in self._journal_widgets:
-            w.destroy()
-        self._journal_widgets = []
+    def _set_quests(self, quests):
+        self._quests = quests
+        # Keep the app-wide quest index in sync so loot ticks items off.
         try:
             from app import quest_progress
-            self._app._journal_quests = quests or []
+            self._app._journal_quests = quests
             self._app._quest_item_index = quest_progress.build_index(quests)
         except Exception:
             pass
-        if not quests:
-            self._journal_msg("No quests in your journal yet.\n"
-                              "Browse gnollguard.com/quests and click “Add to Journal.”")
-            return
-        for q in quests:
-            self._render_journal_quest(q)
+        self._render()
 
-    def _render_journal_quest(self, q):
-        card = ctk.CTkFrame(self._journal_scroll, fg_color=theme.PANEL, corner_radius=8)
+    # ── data: zone ──────────────────────────────────────────────────────────────
+    def update_zone(self, zone: str):
+        """(Public — called by main.py when the player enters a zone.)
+        Floats matching journaled quests to the top and lists other known quests here."""
+        self._current_zone = zone
+        self._zone_lbl.configure(text=(f"📍 {zone}" if zone else ""))
+        if not zone:
+            self._zone_quests = []
+            self._render()
+            return
+
+        def load():
+            quests = []
+            if requests is not None:
+                try:
+                    r = requests.get(API_BASE + "/api/quests/by-zone?zone=" + urllib.parse.quote(zone),
+                                     timeout=12)
+                    if r.ok:
+                        quests = r.json().get("quests", [])
+                except Exception:
+                    log.debug("zone quest fetch failed", exc_info=True)
+            self.after(0, lambda: self._set_zone_quests(quests))
+        threading.Thread(target=load, daemon=True).start()
+
+    def _set_zone_quests(self, quests):
+        self._zone_quests = quests
+        self._render()
+
+    # ── render (the single view) ─────────────────────────────────────────────
+    def _clear(self):
+        for w in self._rows:
+            self._safe(w.destroy)
+        self._rows = []
+
+    def _msg(self, text):
+        lbl = ctk.CTkLabel(self._scroll, text=text, justify="left", wraplength=410,
+                           font=theme.FONT_BODY, text_color=theme.TEXT_SECONDARY)
+        lbl.pack(anchor="w", padx=theme.PAD, pady=theme.PAD)
+        self._rows.append(lbl)
+
+    def _render(self, msg=None):
+        self._clear()
+        if msg:
+            self._msg(msg)
+            return
+        zone = (self._current_zone or "").lower()
+        if not self._quests:
+            self._msg("No quests in your journal yet.\n\nBrowse gnollguard.com/quests and click "
+                      "“Add to Journal” — they'll appear here and tick off as you play.")
+        else:
+            # zone-relevant journaled quests first
+            ordered = sorted(self._quests,
+                             key=lambda q: 0 if (zone and (q.get("zone") or "").lower() == zone) else 1)
+            for q in ordered:
+                self._render_quest(q, here=bool(zone) and (q.get("zone") or "").lower() == zone)
+        # other known quests in this zone that aren't already journaled
+        if self._current_zone and self._zone_quests:
+            have = {q.get("id") for q in self._quests}
+            extra = [q for q in self._zone_quests if q.get("id") not in have]
+            if extra:
+                hdr = ctk.CTkLabel(self._scroll, text=f"— More quests in {self._current_zone} —",
+                                   font=theme.FONT_BODY_SMALL, text_color=theme.TEXT_MUTED)
+                hdr.pack(anchor="w", padx=theme.PAD, pady=(theme.PAD, 2))
+                self._rows.append(hdr)
+                for q in extra[:20]:
+                    self._render_zone_row(q)
+
+    def _render_quest(self, q, here=False):
+        card = ctk.CTkFrame(self._scroll, fg_color=theme.PANEL, corner_radius=8,
+                            border_width=(1 if here else 0), border_color=theme.GOLD)
         card.pack(fill="x", padx=theme.PAD, pady=4)
-        title_row = ctk.CTkFrame(card, fg_color="transparent")
-        title_row.pack(fill="x", padx=theme.PAD, pady=(theme.PAD_SM, 0))
-        ctk.CTkLabel(title_row, text=q.get("quest_name", "Quest"), font=theme.FONT_SUBHEADER,
+        top = ctk.CTkFrame(card, fg_color="transparent")
+        top.pack(fill="x", padx=theme.PAD, pady=(theme.PAD_SM, 0))
+        ctk.CTkLabel(top, text=q.get("quest_name", "Quest"), font=theme.FONT_SUBHEADER,
                      text_color=theme.GOLD, anchor="w").pack(side="left")
-        ctk.CTkButton(title_row, text="🗑", width=28, height=24,
-                      fg_color="transparent", text_color=theme.TEXT_MUTED,
-                      hover_color=theme.DANGER, font=theme.FONT_BODY_SMALL,
+        ctk.CTkButton(top, text="🗑", width=26, height=22, fg_color="transparent",
+                      text_color=theme.TEXT_MUTED, hover_color=theme.DANGER,
+                      font=theme.FONT_BODY_SMALL,
                       command=lambda qq=q: self._delete_quest(qq)).pack(side="right")
         if q.get("zone"):
             ctk.CTkLabel(card, text=q["zone"], font=theme.FONT_BODY_SMALL,
@@ -348,310 +303,91 @@ class JournalOverlay(ctk.CTkToplevel):
         prog = getattr(self._app, "_quest_progress", set())
         given = getattr(self._app, "_quest_given", set())
         for s in sorted(q.get("steps", []) or [], key=lambda s: s.get("step_order", 0)):
-            num, npc = s.get("step_order", ""), (s.get("npc_name") or "")
-            ctk.CTkLabel(card, text=(f"{num}. {npc}" if npc else f"{num}."),
-                         font=theme.FONT_BODY_SMALL, text_color=theme.TEXT_PRIMARY,
-                         anchor="w").pack(anchor="w", padx=theme.PAD, pady=(theme.PAD_SM, 0))
+            num = s.get("step_order", "")
             if s.get("instruction"):
-                ctk.CTkLabel(card, text="   " + s["instruction"], font=theme.FONT_BODY_SMALL,
-                             text_color=theme.TEXT_SECONDARY, anchor="w", justify="left",
-                             wraplength=380).pack(anchor="w", padx=theme.PAD)
-            req = s.get("required_items") or []
-            if req:
-                irow = ctk.CTkFrame(card, fg_color="transparent")
-                irow.pack(anchor="w", padx=theme.PAD, pady=(2, 0))
-                ctk.CTkLabel(irow, text="   Items:", font=theme.FONT_BODY_SMALL,
-                             text_color=theme.TEXT_MUTED).pack(side="left")
-                for it in req:
-                    low = it.lower()
-                    if low in given:
-                        mark, col = "  ✔ ", theme.GREEN
-                    elif low in prog:
-                        mark, col = "  ✓ ", theme.GOLD
-                    else:
-                        mark, col = "  ○ ", theme.TEXT_SECONDARY
-                    ctk.CTkLabel(irow, text=mark + it, font=theme.FONT_BODY_SMALL,
-                                 text_color=col).pack(side="left")
+                ctk.CTkLabel(card, text=f"{num}. {s['instruction']}", font=theme.FONT_BODY_SMALL,
+                             text_color=theme.TEXT_PRIMARY, anchor="w", justify="left",
+                             wraplength=380).pack(anchor="w", padx=theme.PAD, pady=(theme.PAD_SM, 0))
+            for it in (s.get("required_items") or []):
+                low = it.lower()
+                if low in given:
+                    mark, col = "✔", theme.GREEN
+                elif low in prog:
+                    mark, col = "✓", theme.GOLD
+                else:
+                    mark, col = "○", theme.TEXT_SECONDARY
+                ctk.CTkLabel(card, text=f"     {mark} {it}", font=theme.FONT_BODY_SMALL,
+                             text_color=col, anchor="w").pack(anchor="w", padx=theme.PAD)
         if q.get("reward_items"):
-            ctk.CTkLabel(card, text="Rewards: " + ", ".join(q["reward_items"]),
-                         font=theme.FONT_BODY_SMALL, text_color=theme.GOLD, anchor="w").pack(
-                anchor="w", padx=theme.PAD, pady=(theme.PAD_SM, theme.PAD_SM))
+            ctk.CTkLabel(card, text="Reward: " + ", ".join(q["reward_items"]),
+                         font=theme.FONT_BODY_SMALL, text_color=theme.GOLD, anchor="w"
+                         ).pack(anchor="w", padx=theme.PAD, pady=(theme.PAD_SM, theme.PAD_SM))
         else:
-            ctk.CTkLabel(card, text="", font=theme.FONT_BODY_SMALL).pack(pady=(0, theme.PAD_SM))
-        self._journal_widgets.append(card)
+            ctk.CTkFrame(card, fg_color="transparent", height=theme.PAD_SM).pack()
+        self._rows.append(card)
+
+    def _render_zone_row(self, q):
+        row = ctk.CTkFrame(self._scroll, fg_color=theme.PANEL, corner_radius=6)
+        row.pack(fill="x", padx=theme.PAD, pady=2)
+        ctk.CTkLabel(row, text=q.get("quest_name", "Quest"), font=theme.FONT_BODY_SMALL,
+                     text_color=theme.TEXT_PRIMARY, anchor="w").pack(anchor="w", padx=theme.PAD, pady=(4, 0))
+        giver = q.get("quest_giver_npc") or ""
+        if giver:
+            ctk.CTkLabel(row, text=f"   {giver}", font=theme.FONT_BODY_SMALL,
+                         text_color=theme.TEXT_MUTED, anchor="w").pack(anchor="w", padx=theme.PAD, pady=(0, 4))
+        self._rows.append(row)
 
     def _delete_quest(self, q):
-        """Trashcan: remove this quest from the journal (local + Supabase)."""
         import tkinter.messagebox as _mb
-        name = q.get("quest_name", "this quest")
         if not _mb.askyesno("Remove quest",
-                            f"Remove “{name}” from your journal?", parent=self):
+                            f"Remove “{q.get('quest_name', 'this quest')}” from your journal?",
+                            parent=self):
             return
         qid = q.get("id")
+        self._quests = [jq for jq in self._quests if jq.get("id") != qid]
         try:
-            self._app._journal_quests = [
-                jq for jq in getattr(self._app, "_journal_quests", []) if jq.get("id") != qid
-            ]
             from app import quest_progress
-            self._app._quest_item_index = quest_progress.build_index(self._app._journal_quests)
+            self._app._journal_quests = self._quests
+            self._app._quest_item_index = quest_progress.build_index(self._quests)
         except Exception:
             pass
-        threading.Thread(target=lambda: self._app.supabase.remove_quest(qid), daemon=True).start()
+        threading.Thread(target=lambda: self._safe(lambda: self._app.supabase.remove_quest(qid)),
+                         daemon=True).start()
+        self._render()
+
+    # ── status hooks (safe if MainWindow forwards them; harmless otherwise) ─────
+    def update_watcher_status(self, status: str):
+        try:
+            if status.startswith("watching"):
+                c = theme.STATUS_LOG_WATCHING
+            elif status.startswith("reading"):
+                c = theme.STATUS_LOG_READING
+            else:
+                c = theme.STATUS_LOG_DISCONNECTED
+            self._log_light.configure(text_color=c)
+            self._status_lbl.configure(text=status)
+        except Exception:
+            pass
+
+    def _refresh_auth_header(self):
+        """Called on login/logout — just reload the journal for the new auth state."""
         self.refresh_journal()
 
-    # ── Popular tab ─────────────────────────────────────────────────────────--
-
-    def _build_popular_tab(self, parent):
-        head = ctk.CTkFrame(parent, fg_color="transparent")
-        head.pack(fill="x", padx=theme.PAD, pady=theme.PAD_SM)
-        ctk.CTkLabel(head, text="Most-added quests in the community", font=theme.FONT_BODY,
-                     text_color=theme.TEXT_SECONDARY).pack(side="left")
-        ctk.CTkButton(head, text="Refresh", width=72, fg_color=theme.PANEL,
-                      hover_color=theme.PANEL_HOVER, text_color=theme.TEXT_PRIMARY,
-                      font=theme.FONT_BODY_SMALL, command=self.refresh_popular).pack(side="right")
-        self._popular_scroll = ctk.CTkScrollableFrame(parent, fg_color=theme.BG)
-        self._popular_scroll.pack(fill="both", expand=True, padx=theme.PAD, pady=(0, theme.PAD))
-        self._popular_widgets: list = []
-
-    def refresh_popular(self):
-        self._popular_loaded = True
-        for w in getattr(self, "_popular_widgets", []):
-            w.destroy()
-        self._popular_widgets = []
-        self._popular_msg("Loading popular quests…")
-        threading.Thread(target=lambda: self._fetch_quests(
-            "/api/quests/popular?limit=30", self._render_popular), daemon=True).start()
-
-    def _popular_msg(self, text):
-        lbl = ctk.CTkLabel(self._popular_scroll, text=text, font=theme.FONT_BODY,
-                           text_color=theme.TEXT_SECONDARY, wraplength=410, justify="left")
-        lbl.pack(anchor="w", padx=theme.PAD, pady=theme.PAD)
-        self._popular_widgets.append(lbl)
-
-    def _render_popular(self, quests):
-        for w in self._popular_widgets:
-            w.destroy()
-        self._popular_widgets = []
-        if not quests:
-            self._popular_msg("Couldn't load popular quests right now.")
-            return
-        for q in quests:
-            adds = q.get("adds") or 0
-            sub = q.get("zone") or ""
-            if adds:
-                sub = f"{sub}   ·   {adds} added" if sub else f"{adds} added"
-            self._popular_widgets.append(_quest_row(self._popular_scroll, q.get("quest_name", "Quest"), sub))
-
-    # ── Quests in Zone tab ──────────────────────────────────────────────────--
-
-    def _build_zone_tab(self, parent):
-        head = ctk.CTkFrame(parent, fg_color="transparent")
-        head.pack(fill="x", padx=theme.PAD, pady=theme.PAD_SM)
-        self._zone_label = ctk.CTkLabel(head, text="Zone in to see its quests",
-                                        font=theme.FONT_BODY, text_color=theme.TEXT_SECONDARY)
-        self._zone_label.pack(side="left")
-        self._zone_scroll = ctk.CTkScrollableFrame(parent, fg_color=theme.BG)
-        self._zone_scroll.pack(fill="both", expand=True, padx=theme.PAD, pady=(0, theme.PAD))
-        self._zone_widgets: list = []
-
-    def update_zone(self, zone: str):
-        """Called from main.py when the player enters a zone."""
-        self._current_zone = zone
-        self._zone_label.configure(text=f"Quests in {zone}")
-        for w in getattr(self, "_zone_widgets", []):
-            w.destroy()
-        self._zone_widgets = []
-        lbl = ctk.CTkLabel(self._zone_scroll, text="Loading…", font=theme.FONT_BODY,
-                           text_color=theme.TEXT_SECONDARY)
-        lbl.pack(anchor="w", padx=theme.PAD, pady=theme.PAD)
-        self._zone_widgets.append(lbl)
-        import urllib.parse
-        path = "/api/quests/by-zone?zone=" + urllib.parse.quote(zone)
-        threading.Thread(target=lambda: self._fetch_quests(path, self._render_zone), daemon=True).start()
-
-    def _render_zone(self, quests):
-        for w in self._zone_widgets:
-            w.destroy()
-        self._zone_widgets = []
-        if not quests:
-            lbl = ctk.CTkLabel(self._zone_scroll,
-                               text=f"No known quests in {self._current_zone or 'this zone'} yet.",
-                               font=theme.FONT_BODY, text_color=theme.TEXT_SECONDARY, wraplength=410)
-            lbl.pack(anchor="w", padx=theme.PAD, pady=theme.PAD)
-            self._zone_widgets.append(lbl)
-            return
-        for q in quests:
-            sub = q.get("quest_giver_npc") or ""
-            self._zone_widgets.append(_quest_row(self._zone_scroll, q.get("quest_name", "Quest"), sub))
-
-    # ── Shared fetch ────────────────────────────────────────────────────────--
-
-    def _fetch_quests(self, path: str, render):
-        quests = []
-        if requests is not None:
-            try:
-                r = requests.get(API_BASE + path, timeout=12)
-                if r.ok:
-                    quests = r.json().get("quests", [])
-            except Exception:
-                log.debug("quest fetch failed: %s", path, exc_info=True)
-        self.after(0, lambda: render(quests))
-
-    # ── Status bar / updater ────────────────────────────────────────────────--
-
-    def update_watcher_status(self, status: str):
-        if status.startswith("watching"):
-            color = theme.STATUS_LOG_WATCHING
-        elif status.startswith("reading"):
-            color = theme.STATUS_LOG_READING
-        else:
-            color = theme.STATUS_LOG_DISCONNECTED
-        self._log_light.configure(text_color=color)
-        self._watcher_label.configure(text=f"Log: {status}")
-
     def update_sync_status(self, text: str):
-        self._sync_label.configure(text=text)
+        pass  # sync status is shown in the main window
 
-    def show_update_banner(self, version: str, download_url: str, changelog: str):
-        banner = ctk.CTkFrame(self, fg_color="#1A1000", corner_radius=0)
-        banner.pack(fill="x", before=self._content)  # between the tab bar and content
-        ctk.CTkLabel(banner, text=f"⬆  Gnoll Guard {version} is available!",
-                     font=theme.FONT_BODY_SMALL, text_color=theme.GOLD).pack(side="left", padx=theme.PAD, pady=4)
-        ctk.CTkButton(banner, text="Update Now", width=100, fg_color=theme.GOLD, text_color=theme.BG,
-                      hover_color=theme.GREEN, font=theme.FONT_BODY_SMALL,
-                      command=lambda u=download_url: self._install_update(u)).pack(side="right", padx=theme.PAD, pady=3)
+    def show_update_banner(self, *a, **k):
+        pass  # update banner lives in the main window
 
-    def _install_update(self, page_url: str):
-        import tkinter.messagebox as _mb
-        import urllib.request, tempfile, subprocess
-        if not _mb.askyesno("Update Gnoll Guard",
-                            "Download and install the latest version now?\n\nThe app will close to run the installer."):
-            return
-
-        def _do():
-            try:
-                tmp = os.path.join(tempfile.gettempdir(), "GnollGuard-Setup.exe")
-                urllib.request.urlretrieve("https://gnollguard.com/api/download", tmp)
-                subprocess.Popen([tmp])
-                os._exit(0)
-            except Exception as e:
-                self.after(0, lambda: _mb.showerror("Update Failed",
-                    f"Could not download update:\n{e}\n\nDownload manually at gnollguard.com/download"))
-        threading.Thread(target=_do, daemon=True).start()
-
-    # ── Close → hide to tray ────────────────────────────────────────────────--
-
-    # ── Click-through (SAFE) — clicks fall to the game unless over our content ──
-    #
-    # HARD SAFETY RULE (learned from a shell-freeze): NEVER use GetParent(); on a
-    # borderless window that can return the DESKTOP handle, and stamping styles on
-    # the shell freezes the whole PC. We only ever act on our OWN top-level window
-    # (self.winfo_id()) AND only after confirming that handle belongs to THIS
-    # process. Worst case a bug can do is toggle our own overlay's clickability —
-    # it can never touch the desktop/shell/another app.
-    _CT_INTERACTIVE = (
-        "CTkButton", "CTkLabel", "CTkEntry", "CTkTextbox", "CTkSwitch",
-        "CTkOptionMenu", "CTkComboBox", "CTkCheckBox", "CTkSlider",
-        "CTkScrollbar", "Label", "Button", "Entry",
-    )
-
-    def _ct_hwnd_safe(self):
-        """Our overlay's OWN hwnd, but only if it belongs to this process."""
-        if self._ct_dead:
-            return None
-        if self._ct_hwnd:
-            return self._ct_hwnd
-        try:
-            import os
-            from ctypes import windll, byref, c_ulong
-            hwnd = self.winfo_id()          # our own window — NEVER GetParent
-            if not hwnd:
-                return None
-            pid = c_ulong(0)
-            windll.user32.GetWindowThreadProcessId(hwnd, byref(pid))
-            if pid.value != os.getpid():    # not ours → refuse to touch it, ever
-                self._ct_dead = True
-                return None
-            self._ct_hwnd = hwnd
-            return hwnd
-        except Exception:
-            self._ct_dead = True
-            return None
-
-    def _ct_interactive(self, w):
-        """Stay solid/clickable if the cursor is over the header grab-zone, or an
-        interactive widget that belongs to THIS overlay."""
-        grab = getattr(self, "_ct_grab", None)
-        node, depth, under_self, interactive = w, 0, False, False
-        while node is not None and depth < 12:
-            if node is grab:                 # header = always solid (so you can drag)
-                return True
-            if node is self:
-                under_self = True
-            if node.__class__.__name__ in self._CT_INTERACTIVE:
-                interactive = True
-            node = getattr(node, "master", None)
-            depth += 1
-        return interactive and under_self
-
-    def _ct_set(self, on: bool):
-        if on == self._ct_on:
-            return
-        hwnd = self._ct_hwnd_safe()
-        if not hwnd:
-            return
-        try:
-            from ctypes import windll
-            GWL_EXSTYLE = -20
-            WS_EX_TRANSPARENT = 0x00000020  # mouse events pass through
-            # Only toggle the TRANSPARENT bit — do NOT touch WS_EX_LAYERED; that's
-            # Tk's -alpha (opacity). Leaving it alone stops us fighting the layered
-            # window (which was making it vanish at <100% opacity).
-            ex = windll.user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
-            ex = (ex | WS_EX_TRANSPARENT) if on else (ex & ~WS_EX_TRANSPARENT)
-            windll.user32.SetWindowLongW(hwnd, GWL_EXSTYLE, ex)
-            self._ct_on = on
-            # Changing the exstyle can drop the layered alpha → re-assert opacity so
-            # the window never disappears when click-through toggles.
-            try:
-                self.attributes("-alpha", float(self._app.config.get("overlay_opacity", 0.92)))
-            except Exception:
-                pass
-        except Exception:
-            self._ct_dead = True
-
-    def _ct_poll(self):
-        if self._ct_dead or not self.winfo_exists():
-            return
-        try:
-            if getattr(self, "_dragging", False):
-                self._ct_set(False)          # never click-through mid-drag
-            elif self._app.config.get("overlay_click_through", True):
-                w = self.winfo_containing(self.winfo_pointerx(), self.winfo_pointery())
-                self._ct_set(not self._ct_interactive(w))
-            elif self._ct_on:
-                self._ct_set(False)          # feature off → make sure it's clickable
-        except Exception:
-            pass
-        self.after(80, self._ct_poll)
+    def refresh_popular(self, *a, **k):
+        pass  # legacy no-op — the Popular tab was removed in the minimal rebuild
 
     def _on_close(self):
-        """Close just the overlay (the main window keeps running). Persists the
-        position and flips the 'Enable Overlay Window' setting off."""
-        try:
-            self._ct_set(False)   # never leave the window click-through on close
-        except Exception:
-            pass
-        try:
-            self._save_geometry()
-        except Exception:
-            pass
+        """Close just the overlay (main app keeps running); persist position + flip the setting off."""
+        self._save_geometry()
         cfg = getattr(self._app, "config", {})
         cfg["overlay_enabled"] = False
-        try:
-            self._app.save_config()
-        except Exception:
-            pass
+        self._safe(self._app.save_config)
         mw = getattr(self._app, "main_window", None)
         if mw is not None and hasattr(mw, "_overlay"):
             mw._overlay = None
@@ -660,16 +396,3 @@ class JournalOverlay(ctk.CTkToplevel):
         except Exception:
             pass
         self.destroy()
-
-
-def _quest_row(parent, title: str, subtitle: str):
-    row = ctk.CTkFrame(parent, fg_color=theme.PANEL, corner_radius=8)
-    row.pack(fill="x", padx=theme.PAD, pady=3)
-    ctk.CTkLabel(row, text=title, font=theme.FONT_BODY, text_color=theme.GOLD,
-                 anchor="w").pack(anchor="w", padx=theme.PAD, pady=(theme.PAD_SM, 0))
-    if subtitle:
-        ctk.CTkLabel(row, text=subtitle, font=theme.FONT_BODY_SMALL,
-                     text_color=theme.TEXT_SECONDARY, anchor="w").pack(anchor="w", padx=theme.PAD, pady=(0, theme.PAD_SM))
-    else:
-        ctk.CTkLabel(row, text="", font=theme.FONT_BODY_SMALL).pack(pady=(0, 2))
-    return row

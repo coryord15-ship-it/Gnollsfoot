@@ -232,12 +232,7 @@ class AppState:
         # Populated from Supabase on startup so loot lookups never hit the network.
         self._community_cache: dict = {}
 
-        # Item names auto-sold this session (Items tab filter)
-        self._sold_items: set = set()
-
-        # Auto-sold loot observations buffered for batched community submit, and
-        # the current zone (tagged onto each observation + the overlay).
-        self._auto_sold_buffer: list = []
+        # Current zone — used to update the overlay's "Quests in Zone".
         self._current_zone = None
 
         # Quest progress — required-item → quest lookup (rebuilt from the journal),
@@ -393,32 +388,8 @@ def _on_turn_in(app: AppState, evt):
     _refresh_quest_views(app)
 
 
-def _on_auto_sold(app: AppState, evt):
-    """EQL auto-sold a looted item to the bag-vendor. Silent: buffer the
-    observation for batched community submit (powers the 'Frequently Auto-Sold'
-    signal + passive vendor prices + drop data) and flag it for this session."""
-    base = (getattr(evt, "base_name", "") or "").strip()
-    if not base:
-        return
-    app._sold_items.add(base.lower())
-    if getattr(evt, "item_name", ""):
-        app._sold_items.add(evt.item_name.lower())
-    buf = app._auto_sold_buffer
-    if len(buf) < 500:  # safety cap between flushes
-        buf.append({
-            "item_name": base,
-            "tier": int(getattr(evt, "tier", 0) or 0),
-            "quantity": int(getattr(evt, "quantity", 1) or 1),
-            "price_copper": int(getattr(evt, "price_copper", 0) or 0),
-            "sold_for_free": bool(getattr(evt, "sold_for_free", False)),
-            "drop_mob": getattr(evt, "npc_name", "") or "",
-            "drop_zone": app._current_zone or "",
-        })
-
-
 def _on_zone(app: AppState, zone: str):
-    """Player entered a new zone — update the overlay's 'Quests in Zone' tab and
-    remember the zone for auto-sold drop tagging."""
+    """Player entered a new zone — update the overlay's 'Quests in Zone' tab."""
     app._current_zone = zone
     ov = getattr(app, "overlay_window", None)
     win = app.main_window
@@ -574,14 +545,34 @@ def main():
     if not _ensure_single_instance():
         return
 
+    # Multi-monitor / mixed-DPI stability. CustomTkinter normally grabs per-monitor DPI
+    # awareness (SetProcessDpiAwareness(2)) and re-scales windows when they cross to a monitor
+    # with different scaling — which double-scales and BALLOONS the window (the owner hit this
+    # dragging the main window between screens). Turning off CTk's automatic DPI awareness keeps
+    # scaling constant across monitors, so windows stay put. Must run before any CTk/CTkToplevel
+    # window is created. Trade-off: slightly blurry at >100% display scaling — CustomTkinter has
+    # no per-monitor fix (see its Scaling docs), and on a mixed-DPI rig stability wins.
+    try:
+        ctk.deactivate_automatic_dpi_awareness()
+    except Exception:
+        log.debug("deactivate_automatic_dpi_awareness unavailable", exc_info=True)
+
     app = AppState()
+
+    # Anonymous launch headcount — fires on a daemon thread, silent, best-effort.
+    # No personal data (random install id only); never blocks startup. See telemetry.py.
+    try:
+        from app.version import __version__
+        from app import telemetry
+        telemetry.ping_async(__version__)
+    except Exception:
+        log.debug("telemetry ping skipped", exc_info=True)
 
     # Wire log watcher callbacks
     app.log_watcher.on_loot(lambda evt: _on_loot(app, evt))
     app.log_watcher.on_dialogue(lambda evt: _on_dialogue(app, evt))
     app.log_watcher.on_turn_in(lambda evt: _on_turn_in(app, evt))
     app.log_watcher.on_zone(lambda z: _on_zone(app, z))
-    app.log_watcher.on_auto_sold(lambda evt: _on_auto_sold(app, evt))
 
     # Build UI
     win = MainWindow(app)
@@ -591,22 +582,9 @@ def main():
     def on_verify_item(item_name: str):
         def _do():
             verify_item(app.db_session, item_name)
-            item = get_item(app.db_session, item_name)
-            if item and app.supabase.is_configured and app.auth.is_admin:
-                ok = app.supabase.contribute_item(item)
-                if ok:
-                    # Add to in-memory cache so future loots skip local storage
-                    app._community_cache[item_name.lower()] = {
-                        "item_name": item.name,
-                        "description": item.description,
-                        "source_url": item.source_url,
-                        "verified": True,
-                    }
-                    log.info("Contributed '%s' to community DB", item_name)
-            else:
-                # Local-only: either Supabase isn't configured, or the user isn't an
-                # admin (community item authoring is admin-only).
-                log.info("Marked '%s' as correct (local only)", item_name)
+            # Marks the looted item confirmed in the local DB. Community item data
+            # now comes from the harvest pipeline, so there's no in-app authoring.
+            log.info("Marked '%s' as correct (local only)", item_name)
         threading.Thread(target=_do, daemon=True).start()
 
     # Wire alert engine → in-window activity feed (Recent Alerts tab). No popups.
@@ -663,24 +641,6 @@ def main():
                 win.after(30000, poll_inventory)
 
     win.after(15000, poll_inventory)
-
-    # Flush buffered auto-sold observations to the community in batches.
-    def poll_auto_sold():
-        try:
-            buf = app._auto_sold_buffer
-            if buf and app.auth.is_logged_in:
-                batch, app._auto_sold_buffer = buf[:], []
-                threading.Thread(
-                    target=lambda b=batch: app.supabase.submit_auto_sold(b),
-                    daemon=True,
-                ).start()
-        except Exception:
-            log.debug("auto-sold flush error", exc_info=True)
-        finally:
-            if win.winfo_exists():
-                win.after(45000, poll_auto_sold)
-
-    win.after(20000, poll_auto_sold)
 
     # The periodic "Help map item IDs" reminder popup was removed (too distracting).
     # The silent harvest above (poll_inventory) still submits IDs whenever an

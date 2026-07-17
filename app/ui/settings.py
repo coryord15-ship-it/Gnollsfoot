@@ -215,26 +215,6 @@ class SettingsTab(ctk.CTkFrame):
                 command=self._sign_in_discord,
             ).pack(anchor="w", pady=(0, theme.PAD))
 
-        # Admin/Debug tools — only the developer (real admin) ever sees these.
-        if self._app.auth.is_real_admin:
-            self._section(scroll, "Admin / Debug")
-            ctk.CTkLabel(
-                scroll,
-                text="Fire a fake loot event to test the alert window and sound. "
-                     "This item name is clearly fake and won't appear in the community database. "
-                     "To test via the log file, lines need a timestamp prefix like: "
-                     "[Mon Jun 15 12:00:00 2026] --You have looted a Rusty Long Sword.--",
-                font=theme.FONT_BODY, text_color=theme.TEXT_MUTED, anchor="w",
-                wraplength=700, justify="left",
-            ).pack(anchor="w", pady=(0, theme.PAD_SM))
-
-            ctk.CTkButton(
-                scroll, text="Fire Test Alert  ([DEBUG] Gnoll Test Widget)",
-                fg_color=theme.PANEL, text_color=theme.TEXT_PRIMARY,
-                hover_color=theme.PANEL_HOVER, font=theme.FONT_BODY,
-                command=self._fire_test_alert,
-            ).pack(anchor="w", pady=(0, theme.PAD_SM))
-
         self._section(scroll, "Updates")
         from app.version import __version__
         self._update_status_var = ctk.StringVar(value=f"Current version: {__version__}")
