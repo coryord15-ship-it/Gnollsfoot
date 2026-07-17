@@ -74,8 +74,33 @@ def _do_ping(version: str) -> None:
 
 
 def ping_async(version: str) -> None:
-    """Fire the launch ping on a daemon thread and return immediately."""
+    """Fire a single launch ping on a daemon thread and return immediately."""
     try:
         threading.Thread(target=_do_ping, args=(version,), daemon=True).start()
+    except Exception:
+        pass
+
+
+# How often a running app re-pings so it counts as "online". The server treats an
+# install as online if it pinged within the last few of these intervals.
+HEARTBEAT_SECONDS = 180
+
+
+def _heartbeat_loop(version: str) -> None:
+    import time
+    while True:
+        _do_ping(version)          # updates last_seen; that's how "users online" is counted
+        try:
+            time.sleep(HEARTBEAT_SECONDS)
+        except Exception:
+            return
+
+
+def start(version: str) -> None:
+    """Ping once immediately, then keep a silent heartbeat going so the dashboard can
+    show how many people are using the app right now. Still anonymous, still best-effort,
+    still a daemon thread that never blocks or raises into the app."""
+    try:
+        threading.Thread(target=_heartbeat_loop, args=(version,), daemon=True).start()
     except Exception:
         pass

@@ -559,14 +559,14 @@ def main():
 
     app = AppState()
 
-    # Anonymous launch headcount — fires on a daemon thread, silent, best-effort.
+    # Anonymous headcount + "users online" heartbeat — daemon thread, silent, best-effort.
     # No personal data (random install id only); never blocks startup. See telemetry.py.
     try:
         from app.version import __version__
         from app import telemetry
-        telemetry.ping_async(__version__)
+        telemetry.start(__version__)
     except Exception:
-        log.debug("telemetry ping skipped", exc_info=True)
+        log.debug("telemetry heartbeat skipped", exc_info=True)
 
     # Wire log watcher callbacks
     app.log_watcher.on_loot(lambda evt: _on_loot(app, evt))
