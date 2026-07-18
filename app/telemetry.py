@@ -24,7 +24,10 @@ import uuid
 
 log = logging.getLogger(__name__)
 
-PING_URL = "https://gnollguard.com/api/ping"
+# Use the www host directly: the apex (gnollguard.com) 308-redirects to www, and urllib
+# does NOT follow a 308 on a POST (it raises HTTPError), which would silently drop every
+# heartbeat and leave the headcount at zero. Point straight at the 200 URL.
+PING_URL = "https://www.gnollguard.com/api/ping"
 
 
 def _install_id_path() -> str:
