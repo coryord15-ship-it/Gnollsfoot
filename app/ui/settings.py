@@ -29,28 +29,35 @@ class SettingsTab(ctk.CTkFrame):
         scroll = ctk.CTkScrollableFrame(self, fg_color=theme.BG)
         scroll.pack(fill="both", expand=True, padx=theme.PAD, pady=theme.PAD)
 
-        self._section(scroll, "Log File")
+        self._section(scroll, "EQ Legends Logs Folder")
         ctk.CTkLabel(
             scroll,
-            text="Point this at your EverQuest log file. "
-                 "It's usually inside your EQ game folder — look for a file named "
-                 "eqlog_<CharacterName>_<Server>.txt",
+            text="Point this at your EverQuest Legends → Logs folder. The app reads EVERY "
+                 "character log in it automatically (eqlog_<Character>_<Server>.txt), so you "
+                 "don't pick a single file. Default: your Legends install's Logs folder — only "
+                 "change this if you installed Legends somewhere else.",
             font=theme.FONT_BODY, text_color=theme.TEXT_MUTED, anchor="w",
             wraplength=700, justify="left",
         ).pack(anchor="w", pady=(0, theme.PAD_SM))
+        # The watcher works off the FOLDER (it tails every log in it). We keep the folder in
+        # log_dir; log_file_path stays supported for back-compat but the folder is what matters.
+        _cur_dir = self._app.config.get("log_dir") or os.path.dirname(
+            self._app.config.get("log_file_path", "") or "")
         path_row = ctk.CTkFrame(scroll, fg_color="transparent")
         path_row.pack(fill="x", pady=(0, theme.PAD))
+        self._log_dir_var = ctk.StringVar(value=_cur_dir)
+        # kept for _save() back-compat with existing config
         self._log_path_var = ctk.StringVar(value=self._app.config.get("log_file_path", ""))
         ctk.CTkEntry(
-            path_row, textvariable=self._log_path_var,
+            path_row, textvariable=self._log_dir_var,
             fg_color=theme.PANEL, text_color=theme.TEXT_PRIMARY,
             border_color=theme.BORDER, font=theme.FONT_BODY,
         ).pack(side="left", fill="x", expand=True, padx=(0, theme.PAD_SM))
         ctk.CTkButton(
-            path_row, text="Browse", width=80,
+            path_row, text="Browse…", width=90,
             fg_color=theme.GOLD, text_color=theme.BG,
             hover_color=theme.GREEN, font=theme.FONT_BODY,
-            command=self._browse_log,
+            command=self._browse_log_folder,
         ).pack(side="right")
 
         self._section(scroll, "Display")
@@ -289,17 +296,14 @@ class SettingsTab(ctk.CTkFrame):
             except Exception:
                 pass
 
-    def _browse_log(self):
-        initial = self._app.config.get("eql_log_dir") or \
-                  self._app.config.get("eql_game_dir") or \
-                  os.path.expanduser("~")
-        path = fd.askopenfilename(
-            title="Select EQL Log File",
-            initialdir=initial,
-            filetypes=[("Log files", "*.txt *.log"), ("All files", "*.*")],
-        )
+    def _browse_log_folder(self):
+        initial = self._log_dir_var.get() or \
+                  r"C:\Users\Public\Daybreak Game Company\Installed Games\EverQuest Legends\Logs"
+        if not os.path.isdir(initial):
+            initial = os.path.expanduser("~")
+        path = fd.askdirectory(title="Select your EQ Legends Logs folder", initialdir=initial)
         if path:
-            self._log_path_var.set(path)
+            self._log_dir_var.set(path)
 
     def _browse_export_dir(self):
         path = fd.askdirectory(title="Select Export Directory")
@@ -325,6 +329,15 @@ class SettingsTab(ctk.CTkFrame):
         self._build()
 
     def _save(self):
+        # Folder is the source of truth now — the watcher tails every log in it. Keep
+        # log_file_path pointed inside the chosen folder so back-compat paths stay valid.
+        _dir = self._log_dir_var.get().strip()
+        if _dir:
+            self._app.config["log_dir"] = _dir
+            if not os.path.dirname(self._log_path_var.get()) == _dir:
+                import glob as _g
+                _found = sorted(_g.glob(os.path.join(_dir, "eqlog_*.txt")))
+                self._log_path_var.set(_found[0] if _found else os.path.join(_dir, "eqlog.txt"))
         self._app.config["log_file_path"] = self._log_path_var.get()
         self._app.config["theme"] = "light" if self._theme_var.get() == "Light" else "default"
         self._app.config["overlay_enabled"] = bool(self._overlay_var.get())
