@@ -736,12 +736,14 @@ def main():
     if not _log_path or not os.path.isfile(_log_path):
         try:
             import glob as _glob
+            # EverQuest LEGENDS only. Do NOT add live-EverQuest fallback paths here: this app
+            # is for Legends, its logs are format-identical to live EQ, and the 1.5.6 quest
+            # pipeline would happily submit live-EQ quest dialogue into the EQL database if we
+            # auto-attached to a live-EQ log. (Removed 2026-07-20 — those fallbacks were the
+            # real cross-game hole.)
             _search_dirs = [
                 app.config.get("eql_log_dir", ""),
                 r"C:\Users\Public\Daybreak Game Company\Installed Games\EverQuest Legends\Logs",
-                r"C:\Users\Public\Daybreak Game Company\Installed Games\EverQuest\Logs",
-                r"C:\Program Files (x86)\EverQuest\Logs",
-                r"C:\Program Files\EverQuest\Logs",
             ]
             _candidates: list[str] = []
             for _log_dir in _search_dirs:
