@@ -401,6 +401,53 @@ def _on_zone(app: AppState, zone: str):
             log.debug("overlay zone update failed", exc_info=True)
 
 
+def _start_quest_sightings(app: AppState):
+    r"""Wire the quest-sighting collector to the log watcher and flush its queue.
+
+    Everything lives in %APPDATA%\GnollGuard\ alongside settings — the queue file embeds
+    NPC text from the player's own log, so it stays per-user and out of the install dir.
+
+    Order matters: fetch the manifest FIRST so the collector can drop already-known lines
+    before they are ever queued (that is what keeps the database from being hammered), then
+    flush anything left over from the previous session.
+    """
+    from app import quest_sightings as qs
+    from app import quest_sighting_sync as qsync
+
+    user_dir = os.path.join(
+        os.environ.get("APPDATA") or os.path.expanduser("~"), "GnollGuard")
+    os.makedirs(user_dir, exist_ok=True)
+    queue_path = os.path.join(user_dir, "quest_sightings.jsonl")
+    manifest_cache = os.path.join(user_dir, "sightings_manifest.json")
+
+    player = qs.player_from_log_path(app.log_watcher.log_path or "")
+    known, wanted = qsync.load_manifest(manifest_cache)
+    collector = qs.QuestSightingCollector(queue_path, player=player, known=known)
+    collector.wanted = wanted
+    app.quest_sightings = collector
+
+    app.log_watcher.on_dialogue(
+        lambda evt: collector.on_dialogue(evt.npc_name, evt.text))
+    app.log_watcher.on_zone(lambda z: collector.set_zone(z))
+
+    # The player's own line is the conversation anchor ("You say, 'Hail, Guard Bml'") and
+    # marks when a bracket phrase was repeated back — the NPC's next line is then the chain
+    # response we are usually missing. It isn't covered by the npc_dialogue pattern, which
+    # matches "<NPC> says," not "You say," — so read it off the raw line.
+    _you_say = re.compile(r"You say,?\s*'(?P<text>.+?)'\s*$", re.I)
+
+    def _raw(line: str):
+        m = _you_say.search(line or "")
+        if m:
+            collector.on_player_say(m.group("text"))
+    app.log_watcher.on_any_line(_raw)
+
+    # Flush last session's leftovers now (app open). Uploading is idempotent and resumable,
+    # so a crash mid-send costs nothing.
+    qsync.upload_async(queue_path, on_done=lambda n: log.info("uploaded %s quest sighting(s)", n))
+    log.info("quest sightings active (player=%s, %s known ids cached)", player or "?", len(known))
+
+
 def _on_dialogue(app: AppState, evt):
     """NPC said something — scan it for quest-item hints and, if one matches a
     recently looted item, fire a quest hint. Purely in-memory; no NPC data stored."""
@@ -470,6 +517,14 @@ def _build_tray(app: AppState):
 
 def _shutdown(app: AppState):
     def do_shutdown():
+        # Flush queued quest sightings on the way out. Best-effort and non-blocking — the
+        # queue is already durable on disk, so anything missed here just goes next launch.
+        try:
+            if getattr(app, "quest_sightings", None):
+                from app import quest_sighting_sync as qsync
+                qsync.upload_async(app.quest_sightings.queue_path)
+        except Exception:
+            log.debug("sighting flush on shutdown failed", exc_info=True)
         app.log_watcher.stop()
         app.log_rotator.stop()
         try:
@@ -573,6 +628,16 @@ def main():
     app.log_watcher.on_dialogue(lambda evt: _on_dialogue(app, evt))
     app.log_watcher.on_turn_in(lambda evt: _on_turn_in(app, evt))
     app.log_watcher.on_zone(lambda z: _on_zone(app, z))
+
+    # ── Quest sightings: grow the community quest DB from real play ──────────────
+    # Log-based only. Groups NPC speech into conversations, drops combat barks and bare
+    # greetings, dedupes against the server's manifest, queues to disk, and uploads in
+    # batches on open/close. Wired through the EXISTING callbacks so the hot log path is
+    # untouched. Fail-safe: any error here must never affect loot/journal handling.
+    try:
+        _start_quest_sightings(app)
+    except Exception:
+        log.debug("quest sightings unavailable", exc_info=True)
 
     # Build UI
     win = MainWindow(app)
