@@ -86,21 +86,28 @@ _RACES = (r"human|barbarian|erudite|wood elf|high elf|dark elf|half elf|halfling
 _RACE_RE = re.compile(rf"\b({_RACES})\b", re.I)
 
 
-def _norm(text: str, player: str = "") -> str:
+def _norm(text: str, player="") -> str:
     """Normalise a line so the same sentence hashes identically for every player.
 
     NPCs address you by name ("Greetings, Morbid.") AND by race ("hail yourself, ogre!") —
-    left in, one quest becomes N near-identical rows, one per player name/race that heard it."""
+    left in, one quest becomes N near-identical rows, one per player name/race that heard it.
+
+    `player` may be a single name OR an iterable of names. The app watches EVERY character
+    log in the folder, so we strip ALL of the player's character names — otherwise a line
+    heard on a second character leaks that character's name into the stored text and hashes
+    differently from the same line heard on the first."""
+    names = [player] if isinstance(player, str) else list(player or [])
     t = (text or "").strip()
-    if player:
-        t = re.sub(rf"\b{re.escape(player)}\b", "<player>", t, flags=re.I)
+    # strip longer names first so a short name isn't a substring-collision of a longer one
+    for nm in sorted((n for n in names if n), key=len, reverse=True):
+        t = re.sub(rf"\b{re.escape(nm)}\b", "<player>", t, flags=re.I)
     t = _RACE_RE.sub("<race>", t)
     t = re.sub(r"\s+", " ", t)
     return t.lower()
 
 
-def line_id(npc: str, text: str, player: str = "") -> str:
-    """Stable content id — the same line from any player yields the same id."""
+def line_id(npc: str, text: str, player="") -> str:
+    """Stable content id — the same line from any player/character yields the same id."""
     basis = f"{(npc or '').strip().lower()}|{_norm(text, player)}"
     return hashlib.sha1(basis.encode("utf-8")).hexdigest()[:12]
 
@@ -134,6 +141,21 @@ def player_from_log_path(path: str) -> str:
     base = os.path.basename(path or "")
     m = re.match(r"eqlog_([A-Za-z]+)_", base)
     return m.group(1) if m else ""
+
+
+def players_from_log_folder(folder: str) -> list:
+    """EVERY character name in a Logs folder. The watcher tails all of them, so we must strip
+    all of their names — not just the one in log_file_path."""
+    import glob
+    names = set()
+    try:
+        for f in glob.glob(os.path.join(folder or "", "eqlog_*.txt")):
+            n = player_from_log_path(f)
+            if n:
+                names.add(n)
+    except Exception:
+        pass
+    return sorted(names)
 
 
 class QuestSightingCollector:

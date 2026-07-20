@@ -420,7 +420,13 @@ def _start_quest_sightings(app: AppState):
     queue_path = os.path.join(user_dir, "quest_sightings.jsonl")
     manifest_cache = os.path.join(user_dir, "sightings_manifest.json")
 
-    player = qs.player_from_log_path(app.log_watcher.log_path or "")
+    # Strip EVERY character's name, not just one — the watcher tails all logs in the folder,
+    # so a line heard on a second character would otherwise leak that name into stored text
+    # and hash differently from the same line on the first character.
+    _log_dir = app.config.get("log_dir") or os.path.dirname(app.log_watcher.log_path or "")
+    players = qs.players_from_log_folder(_log_dir) or \
+        [qs.player_from_log_path(app.log_watcher.log_path or "")]
+    player = players                       # collector accepts a list of names
     known, wanted = qsync.load_manifest(manifest_cache)
     collector = qs.QuestSightingCollector(queue_path, player=player, known=known)
     collector.wanted = wanted
