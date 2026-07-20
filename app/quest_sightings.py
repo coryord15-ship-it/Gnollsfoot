@@ -77,14 +77,24 @@ _REWARD = re.compile(
     r"thank you|my thanks|well done|as promised)\b", re.I)
 
 
+# NPCs interpolate the player's RACE as well as their name — proven in real EQL logs:
+#   "hail yourself, ogre! i hope you're here to [help]..." vs the same line to a barbarian.
+# Same logical line, two hashes, two rows unless we normalise race out too. MUST match
+# devtool/log_quest_hails.py exactly, or app and devkit findings stop merging.
+_RACES = (r"human|barbarian|erudite|wood elf|high elf|dark elf|half elf|halfling|dwarf|"
+          r"troll|ogre|gnome|iksar|vah shir|froglok|drakkin")
+_RACE_RE = re.compile(rf"\b({_RACES})\b", re.I)
+
+
 def _norm(text: str, player: str = "") -> str:
     """Normalise a line so the same sentence hashes identically for every player.
 
-    NPCs address you by name ("Greetings, Morbid.") — left in, one quest would become N
-    near-identical rows, one per player who ever heard it."""
+    NPCs address you by name ("Greetings, Morbid.") AND by race ("hail yourself, ogre!") —
+    left in, one quest becomes N near-identical rows, one per player name/race that heard it."""
     t = (text or "").strip()
     if player:
         t = re.sub(rf"\b{re.escape(player)}\b", "<player>", t, flags=re.I)
+    t = _RACE_RE.sub("<race>", t)
     t = re.sub(r"\s+", " ", t)
     return t.lower()
 
