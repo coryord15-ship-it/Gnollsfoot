@@ -131,12 +131,54 @@ def _save_config(config: dict):
         log.error("Failed to save config: %s", e)
 
 
+def _looks_like_live_eq(path: str) -> bool:
+    r"""True if a log path points at LIVE EverQuest instead of EverQuest LEGENDS.
+
+    This app is Legends-only, but Legends logs are byte-for-byte the same shape as live EQ's.
+    So if a user's saved config points at a live-EQ Logs folder, the quest pipeline happily
+    submits live-EQ NPC dialogue into the Legends community database — the exact cross-game
+    pollution we spent 2026-07-19 scrubbing out of community_items. We can't demand the exact
+    canonical Daybreak path (a player may install Legends elsewhere), so we reject only the
+    UNAMBIGUOUS live-EQ signature: a path segment that is exactly "EverQuest" while the path
+    mentions "Legends" nowhere.
+
+        C:\...\Installed Games\EverQuest Legends\Logs   -> allowed (segment carries "Legends")
+        C:\...\Installed Games\EverQuest\Logs           -> REJECTED (live EQ)
+        C:\Program Files\Sony\EverQuest\Logs            -> REJECTED (live EQ)
+        D:\Games\EQLegends\Logs                         -> allowed (path mentions "legends")
+        D:\MyStuff\Logs                                 -> allowed (can't tell — stay permissive)
+    """
+    low = (path or "").strip().lower()
+    if not low or "legends" in low:
+        return False
+    parts = low.replace("/", "\\").split("\\")
+    return any(seg.strip() == "everquest" for seg in parts)
+
+
 def _migrate_config(config: dict) -> dict:
     """
     Ensure user's persisted config has the latest log_patterns.
     The APPDATA copy is only created on first run, so pattern fixes in new
     versions would never reach existing installs without this migration.
     """
+    # ── Cross-game guard (runs FIRST, before any early return below) ──────────────────────
+    # Discard any saved log path that points at LIVE EverQuest rather than EverQuest Legends.
+    # Existing installs (incl. 1.5.6) may have auto-attached to a live-EQ log before the
+    # Legends-only lock landed. A saved path that still exists is trusted verbatim at startup,
+    # so such an install would keep tailing live EQ — and feeding live-EQ quest dialogue into
+    # the Legends community DB — forever. Dropping the keys forces the Legends-locked auto-detect
+    # to re-run and re-point at the real Legends Logs folder. This MUST run even when the bundled
+    # template can't be read (the log_patterns block below returns early in that case). Owner,
+    # 2026-07-21: the journal must read ONLY from the EverQuest Legends Logs folder.
+    _scrubbed = False
+    for _k in ("log_file_path", "log_dir"):
+        if _looks_like_live_eq(config.get(_k, "")):
+            log.warning("Cross-game guard: discarding non-Legends %s = %s", _k, config.get(_k))
+            config.pop(_k, None)
+            _scrubbed = True
+    if _scrubbed:
+        _save_config(config)
+
     bundled_path = _bundled_config_path()
 
     try:
@@ -773,6 +815,15 @@ def main():
     # First-run setup wizard — nothing auto-detected and nothing saved.
     if not _log_path or not os.path.isfile(_log_path):
         _log_path = _run_setup_wizard(app, win) or _log_path
+
+    # Final cross-game guard — never hand a LIVE-EverQuest log to the watcher, even if one
+    # slipped in via a manual wizard pick. The app reads ONLY EverQuest Legends logs.
+    if _looks_like_live_eq(_log_path):
+        log.warning("Cross-game guard: refusing to watch non-Legends log: %s", _log_path)
+        _log_path = ""
+        app.config.pop("log_file_path", None)
+        app.config.pop("log_dir", None)
+        _save_config(app.config)
 
     apply_log_path(_log_path)
 

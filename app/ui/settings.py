@@ -329,6 +329,19 @@ class SettingsTab(ctk.CTkFrame):
         self._build()
 
     def _save(self):
+        # Cross-game guard — this app reads EverQuest LEGENDS logs only. Reject a folder that is
+        # unambiguously LIVE EverQuest (a path segment exactly "EverQuest" with no "Legends"
+        # anywhere) so live-EQ dialogue can never reach the Legends community database.
+        _pick = self._log_dir_var.get().strip()
+        _low = _pick.lower()
+        if _pick and "legends" not in _low and any(
+                s.strip() == "everquest" for s in _low.replace("/", "\\").split("\\")):
+            mb.showerror(
+                "That's live EverQuest, not Legends",
+                "Gnoll Guard reads EverQuest LEGENDS logs only.\n\n"
+                "That folder looks like live EverQuest. Point it at your "
+                "EverQuest Legends → Logs folder instead.")
+            return
         # Folder is the source of truth now — the watcher tails every log in it. Keep
         # log_file_path pointed inside the chosen folder so back-compat paths stay valid.
         _dir = self._log_dir_var.get().strip()
