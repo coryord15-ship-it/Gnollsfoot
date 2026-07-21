@@ -23,7 +23,8 @@
     "zone_line": "You have entered (?P<zone>.+?)(?: (?P<diff>\\d+) \\((?P<difflabel>[^)]+)\\))?\\.",
     "zone_status": "You are currently in: (?P<zone>.+?)(?: (?P<diff>\\d+) \\((?P<difflabel>[^)]+)\\))?$",
     "quest_turn_in": "You (?:have given|give)(?: your)? (?P<item>.+?) to (?P<npc>.+?)[.!]",
-    "auto_sold": "You looted (?:a |an |(?P<qty>\\d+) )?(?P<item>.+?) from (?:a |an )?(?P<npc>.+?)'s corpse and sold it for (?P<price>.+?)\\."
+    "auto_sold": "You looted (?:a |an |(?P<qty>\\d+) )?(?P<item>.+?) from (?:a |an )?(?P<npc>.+?)'s corpse and sold it for (?P<price>.+?)\\.",
+    "kill_line": "You have slain (?P<mob>.+?)!"
   },
   "scrape_sources": [],
   "window": {

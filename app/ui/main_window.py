@@ -15,6 +15,7 @@ from PIL import Image
 
 from app.ui import theme
 from app.ui.settings import SettingsTab
+from app import quest_matcher
 
 
 def _asset(*parts) -> str:
@@ -367,6 +368,7 @@ class MainWindow(ctk.CTk):
             from app import quest_progress
             self._app._journal_quests = quests or []
             self._app._quest_item_index = quest_progress.build_index(quests)
+            self._app.quest_matcher.set_quests(quests or [])
         except Exception:
             pass
 
@@ -384,12 +386,27 @@ class MainWindow(ctk.CTk):
         card = ctk.CTkFrame(self._journal_scroll, fg_color=theme.PANEL, corner_radius=8)
         card.pack(fill="x", padx=theme.PAD, pady=4)
 
+        matcher = getattr(self._app, "quest_matcher", None)
+        steps = sorted(q.get("steps", []) or [], key=lambda s: s.get("step_order", 0))
+
+        # Structured steps (action_type set) drive done/active off the matcher's
+        # persisted state; legacy raw-text steps (no action_type yet — most of
+        # the pre-migration catalog, left for an auditor) have no matcher signal
+        # and just render as before, without a progress count.
+        structured = [s for s in steps if s.get("action_type")]
+
         title_row = ctk.CTkFrame(card, fg_color="transparent")
         title_row.pack(fill="x", padx=theme.PAD, pady=(theme.PAD_SM, 0))
         ctk.CTkLabel(
             title_row, text=q.get("quest_name", "Quest"), font=theme.FONT_SUBHEADER,
             text_color=theme.GOLD, anchor="w",
         ).pack(side="left")
+        if structured and matcher:
+            done_n, total_n = matcher.progress(q)
+            ctk.CTkLabel(
+                title_row, text=f"  {done_n}/{total_n}", font=theme.FONT_BODY_SMALL,
+                text_color=theme.TEXT_SECONDARY,
+            ).pack(side="left")
         ctk.CTkButton(
             title_row, text="🗑", width=30, height=26,
             fg_color="transparent", text_color=theme.TEXT_MUTED,
@@ -404,25 +421,59 @@ class MainWindow(ctk.CTk):
 
         prog = getattr(self._app, "_quest_progress", set())
         given = getattr(self._app, "_quest_given", set())
-        steps = sorted(q.get("steps", []) or [], key=lambda s: s.get("step_order", 0))
+
+        # The active step = the first not-yet-done structured step whose
+        # prerequisites (if any) are already done — mirrors quest_matcher's own
+        # eligibility rule so the highlighted step is always the one that can
+        # actually complete next.
+        done_by_order = {}
+        if matcher:
+            for s in structured:
+                done_by_order[s.get("step_order")] = matcher.is_step_done(q.get("id"), s.get("step_order"))
+        active_order = None
+        for s in structured:
+            order = s.get("step_order")
+            if done_by_order.get(order):
+                continue
+            prereqs = s.get("prerequisite_step_orders") or []
+            if prereqs and not all(done_by_order.get(p) for p in prereqs):
+                continue
+            active_order = order
+            break
+
         for s in steps:
             num = s.get("step_order", "")
             npc = s.get("npc_name") or ""
-            head = f"{num}. {npc}" if npc else f"{num}."
+            is_structured = bool(s.get("action_type"))
+            is_done = is_structured and done_by_order.get(num, False)
+            is_active = is_structured and num == active_order
+
+            row = ctk.CTkFrame(
+                card, corner_radius=6,
+                fg_color=(theme.PANEL_HOVER if is_done else "transparent"),
+                border_width=2 if is_active else 0,
+                border_color=theme.GOLD,
+            )
+            row.pack(fill="x", padx=theme.PAD, pady=(theme.PAD_SM, 0))
+
+            mark = "✓ " if is_done else ("► " if is_active else "")
+            head = f"{mark}{num}. {npc}" if npc else f"{mark}{num}."
+            head_color = theme.GREEN if is_done else (theme.GOLD if is_active else theme.TEXT_PRIMARY)
             ctk.CTkLabel(
-                card, text=head, font=theme.FONT_BODY_SMALL,
-                text_color=theme.TEXT_PRIMARY, anchor="w",
-            ).pack(anchor="w", padx=theme.PAD, pady=(theme.PAD_SM, 0))
+                row, text=head, font=theme.FONT_BODY_SMALL,
+                text_color=head_color, anchor="w",
+            ).pack(anchor="w", padx=(4, 4), pady=(2, 0))
             if s.get("instruction"):
                 ctk.CTkLabel(
-                    card, text="   " + s["instruction"], font=theme.FONT_BODY_SMALL,
-                    text_color=theme.TEXT_SECONDARY, anchor="w", justify="left", wraplength=460,
-                ).pack(anchor="w", padx=theme.PAD)
+                    row, text="   " + s["instruction"], font=theme.FONT_BODY_SMALL,
+                    text_color=theme.TEXT_SECONDARY, anchor="w", justify="left", wraplength=440,
+                ).pack(anchor="w", padx=(4, 4))
+
             # Required items, each with a looted-state checkmark (✓ green / ○ muted)
-            req = s.get("required_items") or []
+            req = s.get("required_items") or [i.get("item_name") for i in (s.get("items") or []) if i.get("item_name")]
             if req:
-                irow = ctk.CTkFrame(card, fg_color="transparent")
-                irow.pack(anchor="w", padx=theme.PAD, pady=(2, 0))
+                irow = ctk.CTkFrame(row, fg_color="transparent")
+                irow.pack(anchor="w", padx=(4, 4), pady=(2, 0))
                 ctk.CTkLabel(
                     irow, text="   Items:", font=theme.FONT_BODY_SMALL,
                     text_color=theme.TEXT_MUTED,
@@ -430,15 +481,35 @@ class MainWindow(ctk.CTk):
                 for it in req:
                     low = it.lower()
                     if low in given:
-                        mark, col = "  ✔ ", theme.GREEN       # turned in to NPC
+                        imark, col = "  ✔ ", theme.GREEN       # turned in to NPC
                     elif low in prog:
-                        mark, col = "  ✓ ", theme.GOLD        # looted, not yet turned in
+                        imark, col = "  ✓ ", theme.GOLD        # looted, not yet turned in
                     else:
-                        mark, col = "  ○ ", theme.TEXT_SECONDARY
+                        imark, col = "  ○ ", theme.TEXT_SECONDARY
                     ctk.CTkLabel(
-                        irow, text=mark + it,
+                        irow, text=imark + it,
                         font=theme.FONT_BODY_SMALL, text_color=col,
                     ).pack(side="left")
+
+            if is_structured:
+                btn_row = ctk.CTkFrame(row, fg_color="transparent")
+                btn_row.pack(anchor="w", padx=(4, 4), pady=(2, theme.PAD_SM))
+                entity = s.get("entities")
+                wp = quest_matcher.waypoint_command(entity) if entity else None
+                if wp:
+                    ctk.CTkButton(
+                        btn_row, text="📍 Copy /waypoint", width=140, height=22,
+                        font=theme.FONT_BODY_SMALL, fg_color=theme.PANEL_HOVER,
+                        text_color=theme.TEXT_SECONDARY, hover_color=theme.BORDER,
+                        command=lambda cmd=wp: self._copy_to_clipboard(cmd),
+                    ).pack(side="left", padx=(0, 6))
+                toggle_text = "Mark undone" if is_done else "Mark done"
+                ctk.CTkButton(
+                    btn_row, text=toggle_text, width=100, height=22,
+                    font=theme.FONT_BODY_SMALL, fg_color=theme.PANEL_HOVER,
+                    text_color=theme.TEXT_SECONDARY, hover_color=theme.BORDER,
+                    command=lambda qq=q, ss=s, done=is_done: self._toggle_step(qq, ss, done),
+                ).pack(side="left")
 
         if q.get("reward_items"):
             ctk.CTkLabel(
@@ -449,6 +520,26 @@ class MainWindow(ctk.CTk):
             ctk.CTkLabel(card, text="", font=theme.FONT_BODY_SMALL).pack(pady=(0, theme.PAD_SM))
 
         self._journal_widgets.append(card)
+
+    def _copy_to_clipboard(self, text: str):
+        try:
+            self.clipboard_clear()
+            self.clipboard_append(text)
+        except Exception:
+            log.debug("clipboard copy failed", exc_info=True)
+
+    def _toggle_step(self, q, s, was_done: bool):
+        """Manual override — the safety net when the log misses a line (zone
+        crash, lag, an unmatched phrasing). Never touches the network."""
+        matcher = getattr(self._app, "quest_matcher", None)
+        if not matcher:
+            return
+        qid, order = q.get("id"), s.get("step_order")
+        if was_done:
+            matcher.mark_undone(qid, order)
+        else:
+            matcher.mark_done(qid, order)
+        self._refresh_journal()
 
     def _delete_quest(self, q):
         """Trashcan: remove this quest from the journal (local + Supabase)."""
@@ -465,6 +556,7 @@ class MainWindow(ctk.CTk):
             ]
             from app import quest_progress
             self._app._quest_item_index = quest_progress.build_index(self._app._journal_quests)
+            self._app.quest_matcher.set_quests(self._app._journal_quests)
         except Exception:
             pass
         threading.Thread(

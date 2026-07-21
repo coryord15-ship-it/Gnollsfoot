@@ -214,6 +214,7 @@ class JournalOverlay(ctk.CTkToplevel):
             from app import quest_progress
             self._app._journal_quests = quests
             self._app._quest_item_index = quest_progress.build_index(quests)
+            self._app.quest_matcher.set_quests(quests)
         except Exception:
             pass
         self._render()
@@ -293,6 +294,12 @@ class JournalOverlay(ctk.CTkToplevel):
         top.pack(fill="x", padx=theme.PAD, pady=(theme.PAD_SM, 0))
         ctk.CTkLabel(top, text=q.get("quest_name", "Quest"), font=theme.FONT_SUBHEADER,
                      text_color=theme.GOLD, anchor="w").pack(side="left")
+        matcher = getattr(self._app, "quest_matcher", None)
+        structured = [s for s in (q.get("steps") or []) if s.get("action_type")]
+        if structured and matcher:
+            done_n, total_n = matcher.progress(q)
+            ctk.CTkLabel(top, text=f"  {done_n}/{total_n}", font=theme.FONT_BODY_SMALL,
+                         text_color=theme.TEXT_SECONDARY).pack(side="left")
         ctk.CTkButton(top, text="🗑", width=26, height=22, fg_color="transparent",
                       text_color=theme.TEXT_MUTED, hover_color=theme.DANGER,
                       font=theme.FONT_BODY_SMALL,
@@ -304,9 +311,13 @@ class JournalOverlay(ctk.CTkToplevel):
         given = getattr(self._app, "_quest_given", set())
         for s in sorted(q.get("steps", []) or [], key=lambda s: s.get("step_order", 0)):
             num = s.get("step_order", "")
+            is_done = bool(matcher and s.get("action_type")
+                            and matcher.is_step_done(q.get("id"), num))
             if s.get("instruction"):
-                ctk.CTkLabel(card, text=f"{num}. {s['instruction']}", font=theme.FONT_BODY_SMALL,
-                             text_color=theme.TEXT_PRIMARY, anchor="w", justify="left",
+                mark = "✓ " if is_done else ""
+                col = theme.GREEN if is_done else theme.TEXT_PRIMARY
+                ctk.CTkLabel(card, text=f"{mark}{num}. {s['instruction']}", font=theme.FONT_BODY_SMALL,
+                             text_color=col, anchor="w", justify="left",
                              wraplength=380).pack(anchor="w", padx=theme.PAD, pady=(theme.PAD_SM, 0))
             for it in (s.get("required_items") or []):
                 low = it.lower()
@@ -349,6 +360,7 @@ class JournalOverlay(ctk.CTkToplevel):
             from app import quest_progress
             self._app._journal_quests = self._quests
             self._app._quest_item_index = quest_progress.build_index(self._quests)
+            self._app.quest_matcher.set_quests(self._quests)
         except Exception:
             pass
         threading.Thread(target=lambda: self._safe(lambda: self._app.supabase.remove_quest(qid)),
