@@ -29,6 +29,7 @@ import customtkinter as ctk
 
 from app.alerts.engine import Alert, AlertEngine
 from app import quest_progress
+from app import quest_matcher
 from app.db.models import create_db_engine, make_session_factory
 from app.db.queries import (
     get_item, get_items, delete_item, log_loot_event, prune_loot_events,
@@ -225,6 +226,18 @@ def _migrate_config(config: dict) -> dict:
     return config
 
 
+def _primary_character(config: dict) -> str:
+    """Best-guess "the" character for this install, for naming the local quest-step
+    progress file. Prefers the configured log_dir's first character (alphabetical,
+    stable across launches); falls back to the single configured log_file_path."""
+    from app import quest_sightings as _qs
+    log_dir = config.get("log_dir") or os.path.dirname(config.get("log_file_path") or "")
+    names = _qs.players_from_log_folder(log_dir)
+    if names:
+        return names[0]
+    return _qs.player_from_log_path(config.get("log_file_path") or "") or "unknown"
+
+
 class AppState:
     """Central state holder — passed to UI components so they can reach everything."""
 
@@ -285,6 +298,15 @@ class AppState:
         self._quest_progress: set = quest_progress.load_progress()
         self._quest_given: set = quest_progress.load_given()
 
+        # Structured quest-step auto-completion (QUEST_STEPS_PLAN.md v1). State is
+        # local, keyed to the primary character on this install — same single-file
+        # simplicity as quest_progress above, not yet split per character (a real
+        # gap on a shared PC with multiple mains; the manual Mark done/undone
+        # override in the Journal covers it either way).
+        _charname = _primary_character(self.config)
+        _step_state = quest_matcher.StepState.load(quest_matcher.state_path_for(_charname))
+        self.quest_matcher = quest_matcher.QuestMatcher([], _step_state)
+
         # UI refs — set after UI is built
         self.main_window: MainWindow = None
         self.overlay_window = None
@@ -337,6 +359,7 @@ def _build_quest_index(app):
         quests = app.supabase.get_journal()
         app._journal_quests = quests
         app._quest_item_index = quest_progress.build_index(quests)
+        app.quest_matcher.set_quests(quests)
     except Exception:
         log.debug("quest index build failed", exc_info=True)
 
@@ -357,6 +380,23 @@ def _refresh_quest_views(app: AppState):
             pass
 
 
+def _handle_step_completions(app: AppState, newly_done: list):
+    """Common tail for every quest_matcher event hook: log + refresh the
+    Journal + a quiet alert per completed step. Never raises — a matcher bug
+    must not take down loot/dialogue handling."""
+    if not newly_done:
+        return
+    try:
+        for d in newly_done:
+            log.info("Quest step complete: %s — step %s (%s)",
+                      d.get("quest_name"), d.get("step_order"), d.get("instruction"))
+            app.alert_engine.quest_step_complete(
+                d.get("instruction"), d.get("quest_name"), d.get("step_order"))
+        _refresh_quest_views(app)
+    except Exception:
+        log.debug("quest step completion handling failed", exc_info=True)
+
+
 def _on_loot(app: AppState, loot_evt):
     item_name = loot_evt.item_name
     if not item_name:
@@ -370,6 +410,8 @@ def _on_loot(app: AppState, loot_evt):
         target=lambda: log_loot_event(app.db_session, item_name),
         daemon=True,
     ).start()
+
+    _handle_step_completions(app, app.quest_matcher.on_loot(item_name))
 
     # Quest progress: if this drop is a required item in one of the player's
     # journaled quests, tick it off (✓), persist it, and fire a quest alert.
@@ -426,6 +468,7 @@ def _on_turn_in(app: AppState, evt):
         done_ids = {q.get("id") for q in completed}
         app._journal_quests = [q for q in app._journal_quests if q.get("id") not in done_ids]
         app._quest_item_index = quest_progress.build_index(app._journal_quests)
+        app.quest_matcher.set_quests(app._journal_quests)
 
     _refresh_quest_views(app)
 
@@ -433,6 +476,7 @@ def _on_turn_in(app: AppState, evt):
 def _on_zone(app: AppState, zone: str):
     """Player entered a new zone — update the overlay's 'Quests in Zone' tab."""
     app._current_zone = zone
+    _handle_step_completions(app, app.quest_matcher.on_zone(zone))
     ov = getattr(app, "overlay_window", None)
     win = app.main_window
     if ov is not None and win is not None:
@@ -441,6 +485,12 @@ def _on_zone(app: AppState, zone: str):
                 win.after(0, lambda: ov.update_zone(zone))
         except Exception:
             log.debug("overlay zone update failed", exc_info=True)
+
+
+def _on_kill(app: AppState, mob: str):
+    """Player slew a mob ('You have slain <mob>!') — feeds the matcher's `kill`
+    trigger type. No DB write, no alert of its own beyond a completed step."""
+    _handle_step_completions(app, app.quest_matcher.on_kill(mob))
 
 
 def _start_quest_sightings(app: AppState):
@@ -499,6 +549,8 @@ def _start_quest_sightings(app: AppState):
 def _on_dialogue(app: AppState, evt):
     """NPC said something — scan it for quest-item hints and, if one matches a
     recently looted item, fire a quest hint. Purely in-memory; no NPC data stored."""
+    _handle_step_completions(app, app.quest_matcher.on_npc_line(evt.npc_name, evt.text))
+
     def process():
         hints = extract_item_hints(evt.text)
         if not hints:
@@ -676,6 +728,23 @@ def main():
     app.log_watcher.on_dialogue(lambda evt: _on_dialogue(app, evt))
     app.log_watcher.on_turn_in(lambda evt: _on_turn_in(app, evt))
     app.log_watcher.on_zone(lambda z: _on_zone(app, z))
+    app.log_watcher.on_kill(lambda mob: _on_kill(app, mob))
+
+    # The player's own "You say, '...'" line isn't covered by any structured
+    # parser/callback (same reason quest_sightings reads it off the raw line
+    # below) — classify it as a hail or a plain player_line for the matcher.
+    _you_say_for_matcher = re.compile(r"You say,?\s*'(?P<text>.+?)'\s*$", re.I)
+
+    def _matcher_raw_line(line: str):
+        m = _you_say_for_matcher.search(line or "")
+        if not m:
+            return
+        kind, payload = quest_matcher.classify_player_say(m.group("text"))
+        if kind == "hail":
+            _handle_step_completions(app, app.quest_matcher.on_hail(payload))
+        else:
+            _handle_step_completions(app, app.quest_matcher.on_player_line(payload))
+    app.log_watcher.on_any_line(_matcher_raw_line)
 
     # ── Quest sightings: grow the community quest DB from real play ──────────────
     # Log-based only. Groups NPC speech into conversations, drops combat barks and bare

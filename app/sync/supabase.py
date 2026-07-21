@@ -204,8 +204,16 @@ class SupabaseSync:
             quests = self._client.table("quests").select(
                 "id, quest_name, zone, reward_items, faction_rewards"
             ).in_("id", ids).execute()
+            # v1 structured-step columns (QUEST_STEPS_PLAN.md) alongside the original
+            # raw-text ones — a step may have only the old fields until migrated/authored.
+            # entities(...) is a foreign-table embed via target_entity_id, giving the
+            # matcher/UI the tagged /loc without a second round trip.
             steps = self._client.table("quest_steps").select(
-                "quest_id, step_order, npc_name, instruction, required_items, notes"
+                "quest_id, step_order, npc_name, instruction, required_items, notes, "
+                "action_type, target_entity_id, target_zone, keyword, items, match_phrase, "
+                "triggers, trigger_match, prerequisite_step_orders, is_optional, "
+                "loc_override, expected_reward_item, "
+                "entities:target_entity_id(id,name,zone,kind,loc_raw,loc_x,loc_y,loc_z,variant)"
             ).in_("quest_id", ids).order("step_order").execute()
             by_q: dict = {}
             for s in (steps.data or []):

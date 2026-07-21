@@ -69,6 +69,18 @@ class AlertEngine:
             npc_name=npc_name,
         ))
 
+    def quest_step_complete(self, instruction: str, quest_name: str, step_order=None):
+        """A structured quest step auto-ticked from the log (quest_matcher.py).
+        Deliberately quiet/short — this can fire several times in a row during a
+        fast conversation, unlike the rarer item/turn-in alerts."""
+        self._emit(Alert(
+            title=f"Step complete: {quest_name}" if quest_name else "Step complete",
+            body=instruction or "",
+            color=theme.ALERT_QUEST_VERIFIED,
+            badge="Step Complete",
+            alert_type="quest",
+        ))
+
     def quest_item_turned_in(self, item_name: str, npc_name: str, complete: bool = False):
         """Player handed a quest item to an NPC. Shows 'You have given NPC ITEM'
         as a journal update; if this completed the quest, say so."""

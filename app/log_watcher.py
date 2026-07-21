@@ -72,6 +72,10 @@ class LogWatcher:
                          r"You are currently in: (?P<zone>.+?)(?: (?P<diff>\d+) \((?P<difflabel>[^)]+)\))?$"),
             re.IGNORECASE,
         )
+        # "You have slain <mob>!" — confirmed real EQL format (see
+        # reference_eql_log_formats). Feeds quest_matcher's `kill` trigger type.
+        self._kill_pattern = re.compile(
+            patterns.get("kill_line", r"You have slain (?P<mob>.+?)!"), re.IGNORECASE)
         self._current_zone = None
         self._current_difficulty = None
 
@@ -80,6 +84,7 @@ class LogWatcher:
         self._on_dialogue: list[Callable[[DialogueEvent], None]] = []
         self._on_turn_in: list[Callable[[TurnInEvent], None]] = []
         self._on_zone: list[Callable[[str], None]] = []
+        self._on_kill: list[Callable[[str], None]] = []
         self._on_any_line: list[Callable[[], None]] = []  # for the silence timer
 
         self.status = "stopped"  # 'watching' | 'paused' | 'error' | 'stopped'
@@ -91,6 +96,7 @@ class LogWatcher:
     def on_dialogue(self, fn): self._on_dialogue.append(fn)
     def on_turn_in(self, fn): self._on_turn_in.append(fn)
     def on_zone(self, fn): self._on_zone.append(fn)
+    def on_kill(self, fn): self._on_kill.append(fn)
     def on_any_line(self, fn): self._on_any_line.append(fn)
 
     # ── Lifecycle ────────────────────────────────────────────────────────────
@@ -204,6 +210,8 @@ class LogWatcher:
                          r"You are currently in: (?P<zone>.+?)(?: (?P<diff>\d+) \((?P<difflabel>[^)]+)\))?$"),
             re.IGNORECASE,
         )
+        self._kill_pattern = re.compile(
+            patterns.get("kill_line", r"You have slain (?P<mob>.+?)!"), re.IGNORECASE)
 
     # ── Internal ─────────────────────────────────────────────────────────────
 
@@ -289,6 +297,14 @@ class LogWatcher:
             for fn in self._on_loot:
                 try: fn(loot)
                 except Exception: log.exception("on_loot callback error")
+            return
+
+        km = self._kill_pattern.search(line)
+        if km:
+            mob = km.group("mob").strip()
+            for fn in self._on_kill:
+                try: fn(mob)
+                except Exception: log.exception("on_kill callback error")
             return
 
         dialogue = self._npc_parser.parse_dialogue(line)
