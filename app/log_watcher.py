@@ -85,7 +85,7 @@ class LogWatcher:
         self._on_turn_in: list[Callable[[TurnInEvent], None]] = []
         self._on_zone: list[Callable[[str], None]] = []
         self._on_kill: list[Callable[[str], None]] = []
-        self._on_any_line: list[Callable[[], None]] = []  # for the silence timer
+        self._on_any_line: list[Callable[[str], None]] = []  # raw-line callbacks (matcher hail/say, …)
 
         self.status = "stopped"  # 'watching' | 'paused' | 'error' | 'stopped'
         self._partial_line = ""  # buffer for incomplete lines between watchdog reads
@@ -264,10 +264,14 @@ class LogWatcher:
             self._dispatch(line)
 
     def _dispatch(self, line: str):
-        # Notify the silence timer first (any log activity resets it)
+        # Every on_any_line callback gets the raw line. (This was `fn()` with zero args — a leftover
+        # from when on_any_line was only a silence-timer ping. The matcher's hail/"You say" callback
+        # needs the line, and _dispatch was never updated to pass it, so EVERY line threw a
+        # caught-and-logged TypeError and hail/say quest-step matching never actually fired. Fixed
+        # 2026-07-21.)
         for fn in self._on_any_line:
             try:
-                fn()
+                fn(line)
             except Exception:
                 log.exception("on_any_line callback error")
 
