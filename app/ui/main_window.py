@@ -65,6 +65,7 @@ class MainWindow(ctk.CTk):
             self.after(300, lambda: self._safe_iconbitmap(ico))
 
         self._overlay = None
+        self._shutting_down = False
         self._build()
 
         # Re-open the detached overlay if the user had it enabled.
@@ -76,6 +77,19 @@ class MainWindow(ctk.CTk):
             self.iconbitmap(ico)
         except Exception:
             pass
+
+    def safe_after(self, delay, fn):
+        """Guarded self.after() for worker-thread -> UI callbacks. A background thread
+        (log parsing, a Supabase fetch, the updater) can finish AFTER the window has been
+        torn down on Quit; without this guard that after() crashes on a dead Tk root."""
+        if self._shutting_down:
+            return
+        try:
+            if not self.winfo_exists():
+                return
+            self.after(delay, fn)
+        except RuntimeError:
+            pass  # main loop already gone
 
     def toggle_overlay(self, enabled: bool):
         """Spawn or destroy the detached always-on-top Quest overlay (a child window)."""
@@ -346,7 +360,7 @@ class MainWindow(ctk.CTk):
         self._journal_msg("Loading your journal…")
         def load():
             quests = self._app.supabase.get_journal()
-            self.after(0, lambda: self._render_journal(quests))
+            self.safe_after(0, lambda: self._render_journal(quests))
         threading.Thread(target=load, daemon=True).start()
 
     def _journal_msg(self, text):
@@ -580,7 +594,7 @@ class MainWindow(ctk.CTk):
         self._ach_journal_msg("Loading your achievements…")
         def load():
             achs = self._app.supabase.get_achievement_journal()
-            self.after(0, lambda: self._render_achievement_journal(achs))
+            self.safe_after(0, lambda: self._render_achievement_journal(achs))
         threading.Thread(target=load, daemon=True).start()
 
     def _ach_journal_msg(self, text):
@@ -725,13 +739,13 @@ class MainWindow(ctk.CTk):
         def _do():
             try:
                 tmp = os.path.join(tempfile.gettempdir(), "GnollGuard-Setup.exe")
-                self.after(0, lambda: _mb.showinfo("Downloading…",
+                self.safe_after(0, lambda: _mb.showinfo("Downloading…",
                     "Downloading update. The app will close and the installer will open."))
                 urllib.request.urlretrieve(installer_url, tmp)
                 subprocess.Popen([tmp])
                 os._exit(0)
             except Exception as e:
-                self.after(0, lambda: _mb.showerror("Update Failed",
+                self.safe_after(0, lambda: _mb.showerror("Update Failed",
                     f"Could not download update:\n{e}\n\nTry downloading manually at gnollguard.com/download"))
 
         threading.Thread(target=_do, daemon=True).start()

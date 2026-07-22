@@ -371,12 +371,12 @@ def _refresh_quest_views(app: AppState):
     if not win:
         return
     if hasattr(win, "_journal_scroll"):
-        win.after(0, win._refresh_journal)
+        win.safe_after(0, win._refresh_journal)
     ov = getattr(app, "overlay_window", None)
     if ov is not None:
         try:
             if ov.winfo_exists():
-                win.after(0, ov.refresh_journal)
+                win.safe_after(0, ov.refresh_journal)
         except Exception:
             pass
 
@@ -483,7 +483,7 @@ def _on_zone(app: AppState, zone: str):
     if ov is not None and win is not None:
         try:
             if ov.winfo_exists():
-                win.after(0, lambda: ov.update_zone(zone))
+                win.safe_after(0, lambda: ov.update_zone(zone))
         except Exception:
             log.debug("overlay zone update failed", exc_info=True)
 
@@ -569,7 +569,7 @@ def _on_dialogue(app: AppState, evt):
                 if hint.lower() in looted.lower() or looted.lower() in hint.lower():
                     verified = bool(get_item(app.db_session, looted) and
                                     get_item(app.db_session, looted).verified)
-                    app.main_window.after(
+                    app.main_window.safe_after(
                         0,
                         lambda h=hint, l=looted, v=verified:
                             app.alert_engine.quest_hint(l, evt.npc_name, h, v),
@@ -600,11 +600,11 @@ def _build_tray(app: AppState):
             draw.text((20, 20), "GL", fill="#0D0A0B")
 
         def show_window(icon, item):
-            app.main_window.after(0, app.main_window.deiconify)
+            app.main_window.safe_after(0, app.main_window.deiconify)
 
         def quit_app(icon, item):
             icon.stop()
-            app.main_window.after(0, _shutdown(app))
+            app.main_window.safe_after(0, _shutdown(app))
 
         menu = pystray.Menu(
             pystray.MenuItem("Show Gnoll Guard", show_window, default=True),
@@ -632,6 +632,7 @@ def _shutdown(app: AppState):
             app.db_session.close()
         except Exception:
             pass
+        app.main_window._shutting_down = True
         app.main_window.destroy()
     return do_shutdown
 
@@ -697,9 +698,41 @@ def _ensure_single_instance() -> bool:
     return True
 
 
+def _show_boot_splash():
+    """A plain (non-CTk) Tk window shown for the couple of seconds it takes a frozen
+    .exe to finish importing + build the real window — otherwise the user sees nothing
+    but a spinning cursor while PyInstaller's bundle unpacks. Destroyed once MainWindow
+    is built and about to be shown; independent of CTk so it can exist before the real
+    CTk root is created."""
+    import tkinter as tk
+    root = tk.Tk()
+    root.overrideredirect(True)
+    w, h = 360, 150
+    root.update_idletasks()
+    sw, sh = root.winfo_screenwidth(), root.winfo_screenheight()
+    root.geometry(f"{w}x{h}+{(sw - w) // 2}+{(sh - h) // 2}")
+    root.configure(bg="#0D0A0B")
+    try:
+        ico = os.path.join(
+            getattr(sys, "_MEIPASS", os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+            "assets", "icon.ico")
+        if os.path.isfile(ico):
+            root.iconbitmap(ico)
+    except Exception:
+        pass
+    tk.Label(root, text="GNOLL GUARD", fg="#C8960C", bg="#0D0A0B",
+             font=("Segoe UI Semibold", 18)).pack(pady=(32, 6))
+    tk.Label(root, text="loading…", fg="#8899A8", bg="#0D0A0B",
+             font=("Segoe UI", 10)).pack()
+    root.update()
+    return root
+
+
 def main():
     if not _ensure_single_instance():
         return
+
+    splash = _show_boot_splash()
 
     # Multi-monitor / mixed-DPI stability. CustomTkinter normally grabs per-monitor DPI
     # awareness (SetProcessDpiAwareness(2)) and re-scales windows when they cross to a monitor
@@ -757,8 +790,10 @@ def main():
     except Exception:
         log.debug("quest sightings unavailable", exc_info=True)
 
-    # Build UI
+    # Build UI — withdraw immediately so it doesn't flash up behind/beside the splash;
+    # shown for real once everything below is wired.
     win = MainWindow(app)
+    win.withdraw()
     app.main_window = win
 
     # Verify callback: marks item correct locally and pushes to community DB.
@@ -772,15 +807,14 @@ def main():
 
     # Wire alert engine → in-window activity feed (Recent Alerts tab). No popups.
     def on_alert(alert: Alert):
-        win.after(0, lambda a=alert: win.add_alert_row(a, on_verify=on_verify_item))
+        win.safe_after(0, lambda a=alert: win.add_alert_row(a, on_verify=on_verify_item))
 
     app.alert_engine.add_listener(on_alert)
 
     # Wire log watcher status → status bar
     def poll_watcher_status():
-        if win.winfo_exists():
-            win.after(0, lambda: win.update_watcher_status(app.log_watcher.status))
-            win.after(2000, poll_watcher_status)
+        win.safe_after(0, lambda: win.update_watcher_status(app.log_watcher.status))
+        win.safe_after(2000, poll_watcher_status)
 
     win.after(2000, poll_watcher_status)
 
@@ -904,8 +938,8 @@ def main():
     def _on_auth_change():
         app.supabase.set_auth_token(app.auth.access_token)
         threading.Thread(target=lambda: _build_quest_index(app), daemon=True, name="QuestIndex").start()
-        win.after(0, win._refresh_auth_header)
-        win.after(0, lambda: win._settings_tab._build())
+        win.safe_after(0, win._refresh_auth_header)
+        win.safe_after(0, lambda: win._settings_tab._build())
     app.auth.set_auth_change_callback(_on_auth_change)
     app.auth.restore_session()
     app.supabase.set_auth_token(app.auth.access_token)  # apply restored session token
@@ -928,13 +962,20 @@ def main():
 
     # Auto-update checker — quiet background check, shows banner if newer version found
     def _on_update(version: str, url: str, changelog: str):
-        win.after(0, lambda: win.show_update_banner(version, url, changelog))
+        win.safe_after(0, lambda: win.show_update_banner(version, url, changelog))
 
     app.update_checker = UpdateChecker(_on_update)
     app.update_checker.start()
 
     # Start tray in background thread
     threading.Thread(target=lambda: _build_tray(app), daemon=True, name="SysTray").start()
+
+    # Everything is wired — swap the boot splash for the real window.
+    try:
+        splash.destroy()
+    except Exception:
+        pass
+    win.deiconify()
 
     log.info("GnollGuard started")
     win.mainloop()
