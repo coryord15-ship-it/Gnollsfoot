@@ -4,6 +4,8 @@
   "overlay_enabled": false,
   "overlay_opacity": 0.92,
   "overlay_borderless": true,
+  "overlay_font_family": "Segoe UI",
+  "overlay_font_scale": 1.0,
   "alert_duration_seconds": 15,
   "export_directory": "",
   "audio_enabled": false,

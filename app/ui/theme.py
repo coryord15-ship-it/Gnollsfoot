@@ -98,6 +98,60 @@ def apply(name: str):
 # Apply the default palette at import so every constant exists immediately.
 apply("default")
 
+# ── Typography helpers (overlay + optional app-wide scaling) ───────────────────
+# Windows rarely ships true Helvetica; we map to Arial (metric-compatible) when
+# Helvetica is missing so the "Helvetica" option still looks right.
+FONT_FAMILIES = ("Segoe UI", "Helvetica", "Georgia", "Consolas")
+
+_BASE_SIZES = {
+    "header": 18,
+    "subheader": 13,
+    "body": 11,
+    "body_small": 9,
+    "mono": 10,
+}
+
+
+def resolve_font_family(name: str | None) -> str:
+    n = (name or "Segoe UI").strip()
+    if n.lower() in ("helvetica", "helvetica neue", "arial"):
+        # Prefer Helvetica when present; Arial is the Windows stand-in.
+        for cand in ("Helvetica", "Arial", "Segoe UI"):
+            return cand  # CTk/Tk will fall back if missing; first preference is enough
+    if n in FONT_FAMILIES:
+        return n
+    return "Segoe UI"
+
+
+def scaled_fonts(family: str | None = None, scale: float = 1.0):
+    """Return (subheader, body, body_small) font tuples for overlays."""
+    fam = resolve_font_family(family)
+    if fam.lower() == "helvetica":
+        # Explicit dual preference: try Helvetica, else Arial at widget level we just pick Arial on Win
+        import sys
+        fam = "Helvetica" if sys.platform != "win32" else "Arial"
+    s = max(0.8, min(1.6, float(scale or 1.0)))
+    sub = (fam, max(10, int(round(_BASE_SIZES["subheader"] * s))), "bold")
+    body = (fam, max(9, int(round(_BASE_SIZES["body"] * s))))
+    small = (fam, max(8, int(round(_BASE_SIZES["body_small"] * s))))
+    return sub, body, small
+
+
+def apply_ui_fonts(family: str | None = None, scale: float = 1.0):
+    """Update module FONT_* constants (call before building UI, or rebuild after)."""
+    global FONT_HEADER, FONT_SUBHEADER, FONT_BODY, FONT_BODY_SMALL, FONT_MONO
+    fam = resolve_font_family(family)
+    if fam.lower() == "helvetica":
+        import sys
+        fam = "Helvetica" if sys.platform != "win32" else "Arial"
+    s = max(0.8, min(1.6, float(scale or 1.0)))
+    FONT_HEADER = (fam, max(12, int(round(_BASE_SIZES["header"] * s))), "bold")
+    FONT_SUBHEADER = (fam, max(10, int(round(_BASE_SIZES["subheader"] * s))), "bold")
+    FONT_BODY = (fam, max(9, int(round(_BASE_SIZES["body"] * s))))
+    FONT_BODY_SMALL = (fam, max(8, int(round(_BASE_SIZES["body_small"] * s))))
+    FONT_MONO = ("Consolas", max(8, int(round(_BASE_SIZES["mono"] * s))))
+
+
 # ── Fixed (theme-independent) constants ────────────────────────────────────────
 ALERT_WIDTH      = 344
 ALERT_HEIGHT     = 172
