@@ -482,6 +482,7 @@ class MainWindow(ctk.CTk):
                 "Plane of Sky unlocks: gnollguard.com/quests/plane-of-sky"
             )
             self._render_pos_board_button()
+            self._render_rescan_button(self._journal_scroll, self._journal_widgets)
             return
 
         show_hidden = getattr(self, "_journal_show_hidden", False)
@@ -492,7 +493,7 @@ class MainWindow(ctk.CTk):
         hidden = [q for q in quests if (q.get("journal_status") or "") == "hidden"]
         visible = quests if show_hidden else active
 
-        # Filter bar: show/hide hidden + Plane of Sky board
+        # Filter bar: show/hide hidden + Plane of Sky board + re-scan log
         bar = ctk.CTkFrame(self._journal_scroll, fg_color="transparent")
         bar.pack(fill="x", padx=theme.PAD, pady=(theme.PAD, 0))
         self._journal_widgets.append(bar)
@@ -507,6 +508,12 @@ class MainWindow(ctk.CTk):
             width=120, height=26, font=theme.FONT_BODY_SMALL,
             fg_color=theme.PANEL_HOVER, text_color=theme.GOLD,
             command=self._open_pos_board,
+        ).pack(side="left", padx=(0, 6))
+        ctk.CTkButton(
+            bar, text="↺ Re-scan log",
+            width=110, height=26, font=theme.FONT_BODY_SMALL,
+            fg_color=theme.PANEL_HOVER, text_color=theme.TEXT_SECONDARY,
+            command=self._rescan_log_catchup,
         ).pack(side="left")
 
         if not visible:
@@ -528,6 +535,64 @@ class MainWindow(ctk.CTk):
         )
         btn.pack(anchor="w", padx=theme.PAD, pady=6)
         self._journal_widgets.append(btn)
+
+    def _render_rescan_button(self, parent, widget_list):
+        btn = ctk.CTkButton(
+            parent, text="↺ Re-scan recent log (catch up loot + slayer kills)",
+            command=self._rescan_log_catchup, font=theme.FONT_BODY_SMALL,
+            fg_color=theme.PANEL_HOVER, text_color=theme.TEXT_SECONDARY,
+        )
+        btn.pack(anchor="w", padx=theme.PAD, pady=4)
+        widget_list.append(btn)
+
+    def _rescan_log_catchup(self):
+        """T1.5 — re-read recent log lines for missed journal loot + slayer kills."""
+        import tkinter.messagebox as _mb
+        def work():
+            try:
+                watcher = getattr(self._app, "log_watcher", None)
+                if watcher is None:
+                    self.safe_after(0, lambda: _mb.showinfo(
+                        "Re-scan", "Log watcher not ready.", parent=self))
+                    return
+                lines = watcher.rescan_recent()
+                loot_evts = watcher.parse_loot_from_lines(lines)
+                from app.main import _on_loot
+                n_loot = 0
+                for evt in loot_evts:
+                    try:
+                        _on_loot(self._app, evt)
+                        n_loot += 1
+                    except Exception:
+                        pass
+                # Slayer kills from same window
+                from app import slayer_progress
+                import re
+                kill_re = re.compile(r"You have slain (?P<mob>.+?)!", re.I)
+                achs = getattr(self._app, "_achievement_journal", None) or []
+                if not achs:
+                    try:
+                        achs = self._app.supabase.get_achievement_journal() or []
+                        self._app._achievement_journal = achs
+                    except Exception:
+                        achs = []
+                n_kill = slayer_progress.rescan_kills_from_lines(
+                    lines, achs, kill_re)
+                msg = (
+                    f"Scanned {len(lines):,} log lines.\n"
+                    f"Loot events re-checked: {n_loot:,}\n"
+                    f"Kill lines matched: {n_kill:,}\n\n"
+                    "Journal items already ticked stay ticked; new matches apply now."
+                )
+                self.safe_after(0, lambda: (
+                    _mb.showinfo("Re-scan complete", msg, parent=self),
+                    self._refresh_journal(),
+                    self._refresh_achievements(),
+                ))
+            except Exception as e:
+                self.safe_after(0, lambda: _mb.showerror(
+                    "Re-scan failed", str(e), parent=self))
+        threading.Thread(target=work, daemon=True).start()
 
     def _open_pos_board(self):
         """Lightweight PoS class-unlock board window (T1.6)."""
@@ -788,6 +853,14 @@ class MainWindow(ctk.CTk):
         self._ach_journal_msg("Loading your achievements…")
         def load():
             achs = self._app.supabase.get_achievement_journal()
+            self._app._achievement_journal = achs or []
+            try:
+                from app import slayer_progress
+                prog = slayer_progress.load_progress()
+                self._app._slayer_progress = prog
+                achs = [slayer_progress.enrich_achievement(a, prog) for a in (achs or [])]
+            except Exception:
+                pass
             self.safe_after(0, lambda: self._render_achievement_journal(achs))
         threading.Thread(target=load, daemon=True).start()
 
@@ -847,15 +920,24 @@ class MainWindow(ctk.CTk):
                 text_color=theme.TEXT_PRIMARY, anchor="w", justify="left", wraplength=460,
             ).pack(anchor="w", padx=theme.PAD, pady=(theme.PAD_SM, 0))
 
-        # Steps as a numbered checklist. Some achievements have 100+ components, so
-        # cap the rendered rows to keep the HUD snappy and show a "+N more" pointer.
+        # Steps as a numbered checklist. Slayer steps show current/target kills.
         steps = sorted(a.get("steps", []) or [], key=lambda s: s.get("step_order", 0))
         MAX_STEPS = 40
         for i, s in enumerate(steps[:MAX_STEPS], 1):
             desc = s.get("description") or ""
+            tcount = s.get("target_count")
+            if tcount and (s.get("target_kind") == "kill" or s.get("progress_count") is not None):
+                cur = int(s.get("progress_count") or 0)
+                mobs = s.get("target_mobs") or desc
+                done = cur >= int(tcount)
+                line = f"  {i}. {cur}/{int(tcount)} kills — {mobs}"
+                color = theme.GREEN if done else theme.TEXT_SECONDARY
+            else:
+                line = f"  {i}. {desc}"
+                color = theme.TEXT_SECONDARY
             ctk.CTkLabel(
-                card, text=f"  {i}. {desc}", font=theme.FONT_BODY_SMALL,
-                text_color=theme.TEXT_SECONDARY, anchor="w", justify="left", wraplength=460,
+                card, text=line, font=theme.FONT_BODY_SMALL,
+                text_color=color, anchor="w", justify="left", wraplength=460,
             ).pack(anchor="w", padx=theme.PAD, pady=(1, 0))
         if len(steps) > MAX_STEPS:
             ctk.CTkLabel(

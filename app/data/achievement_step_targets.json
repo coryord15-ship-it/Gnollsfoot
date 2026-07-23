@@ -1,0 +1,2693 @@
+{
+  "source": "EQL client AchievementComponentsClient + AchievementAssociationsClient",
+  "generated": "2026-07-23",
+  "steps_with_target_count": 133,
+  "achievements": {
+    "11000000": [
+      {
+        "step_order": 1,
+        "description": "Complete the achievement \"A Force of Nature\"",
+        "association_code": 300001,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 2,
+        "description": "Complete the achievement \"Highly Decorated\"",
+        "association_code": 300002,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 3,
+        "description": "Complete the achievement \"Progressive\"",
+        "association_code": 300003,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      }
+    ],
+    "11000001": [
+      {
+        "step_order": 1,
+        "description": "Complete the achievement \"Doesn't Play Well With Others\"",
+        "association_code": 300004,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 2,
+        "description": "Complete the achievement \"Don't Bug Me\"",
+        "association_code": 300005,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 3,
+        "description": "Complete the achievement \"I Hate Snakes!\"",
+        "association_code": 300006,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 4,
+        "description": "Complete the achievement \"Pesticide\"",
+        "association_code": 300007,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 5,
+        "description": "Complete the achievement \"We are the dead!\"",
+        "association_code": 300008,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 6,
+        "description": "Complete the achievement \"Strange Weather\"",
+        "association_code": 300009,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 7,
+        "description": "Complete the achievement \"The Zookeeper\"",
+        "association_code": 300010,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 8,
+        "description": "Complete the achievement \"Swordfishmermaid\"",
+        "association_code": 300011,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 9,
+        "description": "Complete the achievement \"Orc stomp!\"",
+        "association_code": 300012,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 10,
+        "description": "Complete the achievement \"Ugly creature near my feet...\"",
+        "association_code": 300013,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 11,
+        "description": "Complete the achievement \"BBBBBAAAARRRKKKK!!!!!\"",
+        "association_code": 300014,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 12,
+        "description": "Complete the achievement \"Puttin' On The Dog\"",
+        "association_code": 300015,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 13,
+        "description": "Complete the achievement \"It's Alive!\"",
+        "association_code": 300016,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 14,
+        "description": "Complete the achievement \"Plants Concrete and Stone\"",
+        "association_code": 300017,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 15,
+        "description": "Complete the achievement \"Here Be Dragons!\"",
+        "association_code": 300018,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 16,
+        "description": "Complete the achievement \"Might They Be Giants?\"",
+        "association_code": 300019,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 17,
+        "description": "Complete the achievement \"Legendary Creatures\"",
+        "association_code": 300020,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 18,
+        "description": "Complete the achievement \"Planes, Trains and Element-iles\"",
+        "association_code": 300021,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 19,
+        "description": "Complete the achievement \"A Sight for Sore Eyes\"",
+        "association_code": 300022,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 20,
+        "description": "Complete the achievement \"Domo Arigato\"",
+        "association_code": 300023,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 21,
+        "description": "Complete the achievement \"Foreign Affair\"",
+        "association_code": 300024,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 22,
+        "description": "Complete the achievement \"Invaders in a Strange Land\"",
+        "association_code": 300025,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 23,
+        "description": "Complete the achievement \"Your god has found you lacking.\"",
+        "association_code": 300026,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 24,
+        "description": "Complete the achievement \"Table Flipper\"",
+        "association_code": 300027,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      }
+    ],
+    "11000002": [
+      {
+        "step_order": 1,
+        "description": "Complete the achievement \"I'm a People Person!\"",
+        "association_code": 300028,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 2,
+        "description": "Complete the achievement \"What Keeps Mankind Alive?\"",
+        "association_code": 300029,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 3,
+        "description": "Complete the achievement \"Three letter word for dead...\"",
+        "association_code": 300030,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 4,
+        "description": "Complete the achievement \"Short People\"",
+        "association_code": 300031,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 5,
+        "description": "Complete the achievement \"Simple Folk of the Ykesha\"",
+        "association_code": 300032,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 6,
+        "description": "Complete the achievement \"Bounced!\"",
+        "association_code": 300033,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 7,
+        "description": "Complete the achievement \"Mostly Kunzar\"",
+        "association_code": 300034,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 8,
+        "description": "Complete the achievement \"Catnipped in the bud.\"",
+        "association_code": 300035,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 9,
+        "description": "Complete the achievement \"Amphibicide\"",
+        "association_code": 300036,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 10,
+        "description": "Complete the achievement \"Rats!\"",
+        "association_code": 300037,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 11,
+        "description": "Complete the achievement \"Eight legs are better than one!\"",
+        "association_code": 300038,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 12,
+        "description": "Complete the achievement \"The Hounds\"",
+        "association_code": 300039,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 13,
+        "description": "Complete the achievement \"The Cat's Pajamas\"",
+        "association_code": 300040,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 14,
+        "description": "Complete the achievement \"Bird Flew\"",
+        "association_code": 300041,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 15,
+        "description": "Complete the achievement \"Monkey Business\"",
+        "association_code": 300042,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 16,
+        "description": "Complete the achievement \"I'm Boared!\"",
+        "association_code": 300043,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 17,
+        "description": "Complete the achievement \"Orc Kill!\"",
+        "association_code": 300044,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 18,
+        "description": "Complete the achievement \"Me thinks that you'll be good to eat!\"",
+        "association_code": 300045,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 19,
+        "description": "Complete the achievement \"Gnolling is Half the Battle\"",
+        "association_code": 300046,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 20,
+        "description": "Complete the achievement \"Kobolded Killer\"",
+        "association_code": 300047,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 21,
+        "description": "Complete the achievement \"Gooooooooooooooolem!\"",
+        "association_code": 300048,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 22,
+        "description": "Complete the achievement \"Drawing Life From a Stone\"",
+        "association_code": 300049,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 23,
+        "description": "Complete the achievement \"Living Stone I presume?\"",
+        "association_code": 300050,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 24,
+        "description": "Complete the achievement \"Herbicide\"",
+        "association_code": 300051,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 25,
+        "description": "Complete the achievement \"Dragonbane\"",
+        "association_code": 300052,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 26,
+        "description": "Complete the achievement \"You call that a dragon?\"",
+        "association_code": 300053,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 27,
+        "description": "Complete the achievement \"A Giant Problem\"",
+        "association_code": 300054,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 28,
+        "description": "Complete the achievement \"Shorter People\"",
+        "association_code": 300055,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 29,
+        "description": "Complete the achievement \"Slayer of Mystical Horses\"",
+        "association_code": 300056,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 30,
+        "description": "Complete the achievement \"It's Plane to See\"",
+        "association_code": 300057,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 31,
+        "description": "Complete the achievement \"Breakdown Dead Ahead\"",
+        "association_code": 300058,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 32,
+        "description": "Complete the achievement \"Natives of Velious\"",
+        "association_code": 300059,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 33,
+        "description": "Complete the achievement \"Navies of Luclin\"",
+        "association_code": 300060,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 34,
+        "description": "Complete the achievement \"Natives of Taelosia\"",
+        "association_code": 300061,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 35,
+        "description": "Complete the achievement \"Natives of Kuua\"",
+        "association_code": 300062,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 36,
+        "description": "Complete the achievement \"Natives of Alaris\"",
+        "association_code": 300063,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 37,
+        "description": "Complete the achievement \"Such Anguish\"",
+        "association_code": 300064,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      }
+    ],
+    "11000003": [
+      {
+        "step_order": 1,
+        "description": "Complete the achievement \"Oh the Humanity!\"",
+        "association_code": 300065,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 2,
+        "description": "Complete the achievement \"Barbarous\"",
+        "association_code": 300066,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 3,
+        "description": "Complete the achievement \"Hardly Erudite of You\"",
+        "association_code": 300067,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 4,
+        "description": "Complete the achievement \"Drackity Drak\"",
+        "association_code": 300068,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 5,
+        "description": "Complete the achievement \"Wood you could you?\"",
+        "association_code": 300069,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 6,
+        "description": "Complete the achievement \"Highly Uncivilized\"",
+        "association_code": 300070,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 7,
+        "description": "Complete the achievement \"Dark Elf Antonican, Please!\"",
+        "association_code": 300071,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 8,
+        "description": "Complete the achievement \"Now .49999%\"",
+        "association_code": 300072,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 9,
+        "description": "Complete the achievement \"It was called Tunaria\"",
+        "association_code": 300073,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 11,
+        "description": "Complete the achievement \"Axe me no questions.\"",
+        "association_code": 300074,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 12,
+        "description": "Complete the achievement \"Dainy it's cold outside.\"",
+        "association_code": 300075,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 13,
+        "description": "Complete the achievement \"Fuzzyfeet\"",
+        "association_code": 300076,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 14,
+        "description": "Complete the achievement \"A Clockwork Gnome\"",
+        "association_code": 300077,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 15,
+        "description": "Complete the achievement \"Here's Yer Grozmok\"",
+        "association_code": 300078,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 16,
+        "description": "Complete the achievement \"Get Stupid\"",
+        "association_code": 300079,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 17,
+        "description": "Complete the achievement \"Icky!\"",
+        "association_code": 300080,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 18,
+        "description": "Complete the achievement \"Why the Kylong faces?\"",
+        "association_code": 300081,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 19,
+        "description": "Complete the achievement \"Good Luck, Bad Guk\"",
+        "association_code": 300082,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 20,
+        "description": "Complete the achievement \"It's a frog eat frog world\"",
+        "association_code": 300083,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 21,
+        "description": "Complete the achievement \"Rrrribit!\"",
+        "association_code": 300084,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 22,
+        "description": "Complete the achievement \"Moonkitty\"",
+        "association_code": 300085,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 23,
+        "description": "Complete the achievement \"Not a Kerran the world!\"",
+        "association_code": 300086,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 24,
+        "description": "Complete the achievement \"Bat Country!\"",
+        "association_code": 300087,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 25,
+        "description": "Complete the achievement \"Rat Killer\"",
+        "association_code": 300088,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 26,
+        "description": "Complete the achievement \"Armadilloed and Dangerous\"",
+        "association_code": 300089,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 27,
+        "description": "Complete the achievement \"It Stinks!\"",
+        "association_code": 300090,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 28,
+        "description": "Complete the achievement \"Bunnyslayer\"",
+        "association_code": 300091,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 29,
+        "description": "Complete the achievement \"You dirty ratman!\"",
+        "association_code": 300092,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 30,
+        "description": "Complete the achievement \"Of Micelike Men\"",
+        "association_code": 300093,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 31,
+        "description": "Complete the achievement \"Badger, Badger, Badger...\"",
+        "association_code": 300094,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 32,
+        "description": "Complete the achievement \"Beetlemania\"",
+        "association_code": 300095,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 33,
+        "description": "Complete the achievement \"Leechy Keen\"",
+        "association_code": 300096,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 34,
+        "description": "Complete the achievement \"Corathus!\"",
+        "association_code": 300097,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 35,
+        "description": "Complete the achievement \"Army Ants\"",
+        "association_code": 300098,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 36,
+        "description": "Complete the achievement \"Shoo fly!\"",
+        "association_code": 300099,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 37,
+        "description": "Complete the achievement \"Get the broom!\"",
+        "association_code": 300100,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 38,
+        "description": "Complete the achievement \"A Web of Lies\"",
+        "association_code": 300101,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 39,
+        "description": "Complete the achievement \"Fury of Soriz\"",
+        "association_code": 300102,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 40,
+        "description": "Complete the achievement \"Snake in the Grass\"",
+        "association_code": 300103,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 41,
+        "description": "Complete the achievement \"A Bone to Pick With You\"",
+        "association_code": 300104,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 42,
+        "description": "Complete the achievement \"Stake Dinner\"",
+        "association_code": 300105,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 43,
+        "description": "Complete the achievement \"Hide your brains!\"",
+        "association_code": 300106,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 44,
+        "description": "Complete the achievement \"Mummy Dearest\"",
+        "association_code": 300107,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 45,
+        "description": "Complete the achievement \"Ghoul on the Hill\"",
+        "association_code": 300108,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 46,
+        "description": "Complete the achievement \"Round of Applause\"",
+        "association_code": 300109,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 47,
+        "description": "Complete the achievement \"Ghosts of Frostfell Past\"",
+        "association_code": 300110,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 48,
+        "description": "Complete the achievement \"50 Shades Repaid\"",
+        "association_code": 300111,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 49,
+        "description": "Complete the achievement \"Suit up!\"",
+        "association_code": 300112,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 50,
+        "description": "Complete the achievement \"New Tricks\"",
+        "association_code": 300113,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 51,
+        "description": "Complete the achievement \"Got your Tongue?\"",
+        "association_code": 300114,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 52,
+        "description": "Complete the achievement \"Featherbrained Plan\"",
+        "association_code": 300115,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 53,
+        "description": "Complete the achievement \"Better Get a Barrel\"",
+        "association_code": 300116,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 54,
+        "description": "Complete the achievement \"Bear with me\"",
+        "association_code": 300117,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 56,
+        "description": "Complete the achievement \"The Elephant in the Room\"",
+        "association_code": 300118,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 57,
+        "description": "Complete the achievement \"Overthere in the Wastes\"",
+        "association_code": 300119,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 58,
+        "description": "Complete the achievement \"These boots were made for...\"",
+        "association_code": 300120,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 59,
+        "description": "Complete the achievement \"Guess you didn't like turtles.\"",
+        "association_code": 300121,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 60,
+        "description": "Complete the achievement \"What has science done!?\"",
+        "association_code": 300122,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 61,
+        "description": "Complete the achievement \"Have you seen my bucket?\"",
+        "association_code": 300123,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 62,
+        "description": "Complete the achievement \"Seacow!\"",
+        "association_code": 300124,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 63,
+        "description": "Complete the achievement \"A molkor?\"",
+        "association_code": 300125,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 64,
+        "description": "Complete the achievement \"Sealephant\"",
+        "association_code": 300126,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 65,
+        "description": "Complete the achievement \"A Horse of Course\"",
+        "association_code": 300127,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 66,
+        "description": "Complete the achievement \"Plenty of fish in the sea.\"",
+        "association_code": 300128,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 67,
+        "description": "Complete the achievement \"Why so crabby?\"",
+        "association_code": 300129,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 68,
+        "description": "Complete the achievement \"Orc weapons, your blood will spill!\"",
+        "association_code": 300130,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 69,
+        "description": "Complete the achievement \"New Frontiers\"",
+        "association_code": 300131,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 70,
+        "description": "Complete the achievement \"The More You Gnoll!\"",
+        "association_code": 300132,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 71,
+        "description": "Complete the achievement \"World Warrens Three\"",
+        "association_code": 300133,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 72,
+        "description": "Complete the achievement \"Alliz Tae Ew\"",
+        "association_code": 300134,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 73,
+        "description": "Complete the achievement \"Sarnak Slayer\"",
+        "association_code": 300135,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 74,
+        "description": "Complete the achievement \"Don't be Shellfish!\"",
+        "association_code": 300136,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 75,
+        "description": "Complete the achievement \"Innoruuk's Gift\"",
+        "association_code": 300137,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 77,
+        "description": "Complete the achievement \"A Fallen Empire\"",
+        "association_code": 300138,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 78,
+        "description": "Complete the achievement \"You can call me Alaran\"",
+        "association_code": 300139,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 79,
+        "description": "Complete the achievement \"Re-Extinction\"",
+        "association_code": 300140,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 80,
+        "description": "Complete the achievement \"Aquatic Allure\"",
+        "association_code": 300141,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 81,
+        "description": "Complete the achievement \"I said Argyle!\"",
+        "association_code": 300142,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 82,
+        "description": "Complete the achievement \"You're not scaring anyone.\"",
+        "association_code": 300143,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 83,
+        "description": "Complete the achievement \"Lumberer\"",
+        "association_code": 300144,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 84,
+        "description": "Complete the achievement \"Mushroom Hunting\"",
+        "association_code": 300145,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 85,
+        "description": "Complete the achievement \"Stop dragon this out.\"",
+        "association_code": 300146,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 86,
+        "description": "Complete the achievement \"Quit dragon your heels!\"",
+        "association_code": 300147,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 87,
+        "description": "Complete the achievement \"You keep dragon me into this.\"",
+        "association_code": 300148,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 89,
+        "description": "Complete the achievement \"A Small Giant Problem\"",
+        "association_code": 300149,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 90,
+        "description": "Complete the achievement \"Fairicide\"",
+        "association_code": 300150,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 91,
+        "description": "Complete the achievement \"For the Hive!\"",
+        "association_code": 300151,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 92,
+        "description": "Complete the achievement \"Jumjummery\"",
+        "association_code": 300152,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 93,
+        "description": "Complete the achievement \"Self Centaured\"",
+        "association_code": 300153,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 94,
+        "description": "Complete the achievement \"You're Faunny\"",
+        "association_code": 300154,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 95,
+        "description": "Complete the achievement \"Amazing!\"",
+        "association_code": 300155,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 96,
+        "description": "Complete the achievement \"No Vacancy\"",
+        "association_code": 300156,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 97,
+        "description": "Complete the achievement \"Half Man, Half Scorpion, Half Lion.\"",
+        "association_code": 300157,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 98,
+        "description": "Complete the achievement \"Puzzling\"",
+        "association_code": 300158,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 99,
+        "description": "Complete the achievement \"My Golden Boots\"",
+        "association_code": 300159,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 100,
+        "description": "Complete the achievement \"Imp-atient\"",
+        "association_code": 300160,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 101,
+        "description": "Complete the achievement \"Elementary\"",
+        "association_code": 300161,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 102,
+        "description": "Complete the achievement \"Spin Me Right Round\"",
+        "association_code": 300162,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 105,
+        "description": "Complete the achievement \"They Call Me The Riftseeker\"",
+        "association_code": 300163,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 106,
+        "description": "Complete the achievement \"Terrorible Tentacles\"",
+        "association_code": 300164,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 107,
+        "description": "Complete the achievement \"Denizens of Fear\"",
+        "association_code": 300165,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 108,
+        "description": "Complete the achievement \"Insatiable\"",
+        "association_code": 300166,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 109,
+        "description": "Complete the achievement \"You look lovely\"",
+        "association_code": 300167,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 110,
+        "description": "Complete the achievement \"Eye see what you did there!\"",
+        "association_code": 300168,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 111,
+        "description": "Complete the achievement \"Goo-dness Gracious!\"",
+        "association_code": 300169,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 112,
+        "description": "Complete the achievement \"Cubic\"",
+        "association_code": 300170,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 113,
+        "description": "Complete the achievement \"Gnome Tested, Steamwork Approved!\"",
+        "association_code": 300171,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      },
+      {
+        "step_order": 114,
+        "description": "Complete the achievement \"Discord Sounds Out of Tune\"",
+        "association_code": 300172,
+        "target_count": null,
+        "target_kind": "complete_child",
+        "target_mobs": null
+      }
+    ],
+    "11000004": [
+      {
+        "step_order": 1,
+        "description": "The playable races.",
+        "association_code": 300173,
+        "target_count": 10000,
+        "target_kind": "kill",
+        "target_mobs": "The playable races."
+      }
+    ],
+    "11000005": [
+      {
+        "step_order": 1,
+        "description": "Beetles, Cliknars, Corathus Beasts, Drachnids, Insects, Leeches, Mosquitoes, Spiders, Ursarachnids.",
+        "association_code": 300174,
+        "target_count": 5000,
+        "target_kind": "kill",
+        "target_mobs": "Beetles, Cliknars, Corathus Beasts, Drachnids, Insects, Leeches, Mosquitoes, Spiders, Ursarachnids."
+      }
+    ],
+    "11000006": [
+      {
+        "step_order": 1,
+        "description": "Alligators, Basilisks, Crocodiles, Lizard Men, Sarnaks, Shissar, Snakes, Sokokar, and Turtles.",
+        "association_code": 300175,
+        "target_count": 5000,
+        "target_kind": "kill",
+        "target_mobs": "Alligators, Basilisks, Crocodiles, Lizard Men, Sarnaks, Shissar, Snakes, Sokokar, and Turtles."
+      }
+    ],
+    "11000007": [
+      {
+        "step_order": 1,
+        "description": "Armadillos, Bats, Bubonians, Burynai, Molerats, Rabbits, Ratmen, Rats, Skunks and Werebats.",
+        "association_code": 300176,
+        "target_count": 5000,
+        "target_kind": "kill",
+        "target_mobs": "Armadillos, Bats, Bubonians, Burynai, Molerats, Rabbits, Ratmen, Rats, Skunks and Werebats."
+      }
+    ],
+    "11000008": [
+      {
+        "step_order": 1,
+        "description": "Animated Armors, Ghosts, Ghouls, Mummies, Shades, Skeletons, Spectres, Vampires, and Zombies.",
+        "association_code": 300177,
+        "target_count": 10000,
+        "target_kind": "kill",
+        "target_mobs": "Animated Armors, Ghosts, Ghouls, Mummies, Shades, Skeletons, Spectres, Vampires, and Zombies."
+      }
+    ],
+    "11000009": [
+      {
+        "step_order": 1,
+        "description": "Chokidais, Drolvargs, Hynids, Lions, Pumas, Rotdogs, Tigers, Werewolves, Wolves, Worgs, and Wrulons.",
+        "association_code": 300178,
+        "target_count": 5000,
+        "target_kind": "kill",
+        "target_mobs": "Chokidais, Drolvargs, Hynids, Lions, Pumas, Rotdogs, Tigers, Werewolves, Wolves, Worgs, and Wrulons."
+      }
+    ],
+    "11000010": [
+      {
+        "step_order": 1,
+        "description": "Apes, Bears, Birds, Boars, Mammoths, Mystical Horses, Othmirs, Rhinos, Sea Mammals, and Swinetors.",
+        "association_code": 300179,
+        "target_count": 5000,
+        "target_kind": "kill",
+        "target_mobs": "Apes, Bears, Birds, Boars, Mammoths, Mystical Horses, Othmirs, Rhinos, Sea Mammals, and Swinetors."
+      }
+    ],
+    "11000011": [
+      {
+        "step_order": 1,
+        "description": "Crabs, Fishes, Hraquis, Kedge, Krakens, Mermaids, Nymphs, Piranhas, Seahorses, Sharks, and Sirens.",
+        "association_code": 300180,
+        "target_count": 5000,
+        "target_kind": "kill",
+        "target_mobs": "Crabs, Fishes, Hraquis, Kedge, Krakens, Mermaids, Nymphs, Piranhas, Seahorses, Sharks, and Sirens."
+      }
+    ],
+    "11000012": [
+      {
+        "step_order": 1,
+        "description": "Orcs and Wereorcs.",
+        "association_code": 300181,
+        "target_count": 5000,
+        "target_kind": "kill",
+        "target_mobs": "Orcs and Wereorcs."
+      }
+    ],
+    "11000013": [
+      {
+        "step_order": 1,
+        "description": "Goblins and Nightmare Goblins.",
+        "association_code": 300182,
+        "target_count": 5000,
+        "target_kind": "kill",
+        "target_mobs": "Goblins and Nightmare Goblins."
+      }
+    ],
+    "11000014": [
+      {
+        "step_order": 1,
+        "description": "Gnolls",
+        "association_code": 300183,
+        "target_count": 5000,
+        "target_kind": "kill",
+        "target_mobs": "Gnolls"
+      }
+    ],
+    "11000015": [
+      {
+        "step_order": 1,
+        "description": "Kobolds",
+        "association_code": 300184,
+        "target_count": 5000,
+        "target_kind": "kill",
+        "target_mobs": "Kobolds"
+      }
+    ],
+    "11000016": [
+      {
+        "step_order": 1,
+        "description": "Brellian Constructs, Gargoyles, Gingerbread Men, Golems, Marionettes, Muddites, and Scarecrows.",
+        "association_code": 300185,
+        "target_count": 5000,
+        "target_kind": "kill",
+        "target_mobs": "Brellian Constructs, Gargoyles, Gingerbread Men, Golems, Marionettes, Muddites, and Scarecrows."
+      }
+    ],
+    "11000017": [
+      {
+        "step_order": 1,
+        "description": "Crystal Creatures, Grekens, Living Plants, Shriekers, Sporalis, Stonegrabbers, and Treants.",
+        "association_code": 300186,
+        "target_count": 5000,
+        "target_kind": "kill",
+        "target_mobs": "Crystal Creatures, Grekens, Living Plants, Shriekers, Sporalis, Stonegrabbers, and Treants."
+      }
+    ],
+    "11000018": [
+      {
+        "step_order": 1,
+        "description": "Dinosaurs, Dracoliches, Dragons, Drakes, Drixies, Raptors, Witherans, Wurms, and Wyverns.",
+        "association_code": 300187,
+        "target_count": 5000,
+        "target_kind": "kill",
+        "target_mobs": "Dinosaurs, Dracoliches, Dragons, Drakes, Drixies, Raptors, Witherans, Wurms, and Wyverns."
+      }
+    ],
+    "11000019": [
+      {
+        "step_order": 1,
+        "description": "Giants",
+        "association_code": 300188,
+        "target_count": 5000,
+        "target_kind": "kill",
+        "target_mobs": "Giants"
+      }
+    ],
+    "11000020": [
+      {
+        "step_order": 1,
+        "description": "Bixies, Brownies, Centaurs, Fairies, Griffins, Manticores, Minotaurs, Pixies, Satyr, and Sphinxes.",
+        "association_code": 300189,
+        "target_count": 5000,
+        "target_kind": "kill",
+        "target_mobs": "Bixies, Brownies, Centaurs, Fairies, Griffins, Manticores, Minotaurs, Pixies, Satyr, and Sphinxes."
+      }
+    ],
+    "11000021": [
+      {
+        "step_order": 1,
+        "description": "Dervishes, Efreetis, Elementals, Imps, Nilborien, Riftseekers, Scrykin, Stormriders, and Wraiths.",
+        "association_code": 300190,
+        "target_count": 10000,
+        "target_kind": "kill",
+        "target_mobs": "Dervishes, Efreetis, Elementals, Imps, Nilborien, Riftseekers, Scrykin, Stormriders, and Wraiths."
+      }
+    ],
+    "11000022": [
+      {
+        "step_order": 1,
+        "description": "Amygdalans, Cubes, Eyes, Goos, Gorgons, Harpies, Luggalds, Shiliskins, Tentacle Terrors, and Xulous.",
+        "association_code": 300191,
+        "target_count": 5000,
+        "target_kind": "kill",
+        "target_mobs": "Amygdalans, Cubes, Eyes, Goos, Gorgons, Harpies, Luggalds, Shiliskins, Tentacle Terrors, and Xulous."
+      }
+    ],
+    "11000023": [
+      {
+        "step_order": 1,
+        "description": "Clockwork: Beetles, Boars, Dragons, Rats, Snakes, Spiders, Gnomeworks, Copters, and Tin Soldiers.",
+        "association_code": 300192,
+        "target_count": 5000,
+        "target_kind": "kill",
+        "target_mobs": "Clockwork: Beetles, Boars, Dragons, Rats, Snakes, Spiders, Gnomeworks, Copters, and Tin Soldiers."
+      }
+    ],
+    "11000026": [
+      {
+        "step_order": 1,
+        "description": "The avatar of a deity.",
+        "association_code": 300195,
+        "target_count": 100,
+        "target_kind": "kill",
+        "target_mobs": "The avatar of a deity."
+      }
+    ],
+    "11000027": [
+      {
+        "step_order": 1,
+        "description": "Barrels, Bones, Boxes, Chests, Clocks, Coffins, Mimics, Tables, Totems, Traps, Vases, and Webs.",
+        "association_code": 300196,
+        "target_count": 5000,
+        "target_kind": "kill",
+        "target_mobs": "Barrels, Bones, Boxes, Chests, Clocks, Coffins, Mimics, Tables, Totems, Traps, Vases, and Webs."
+      }
+    ],
+    "11000028": [
+      {
+        "step_order": 1,
+        "description": "Barbarians",
+        "association_code": 300198,
+        "target_count": 10,
+        "target_kind": "kill",
+        "target_mobs": "Barbarians"
+      },
+      {
+        "step_order": 2,
+        "description": "Dark Elves",
+        "association_code": 300203,
+        "target_count": 10,
+        "target_kind": "kill",
+        "target_mobs": "Dark Elves"
+      },
+      {
+        "step_order": 4,
+        "description": "Dwarves",
+        "association_code": 300205,
+        "target_count": 10,
+        "target_kind": "kill",
+        "target_mobs": "Dwarves"
+      },
+      {
+        "step_order": 5,
+        "description": "Erudites",
+        "association_code": 300199,
+        "target_count": 10,
+        "target_kind": "kill",
+        "target_mobs": "Erudites"
+      },
+      {
+        "step_order": 6,
+        "description": "Frogloks",
+        "association_code": 300211,
+        "target_count": 10,
+        "target_kind": "kill",
+        "target_mobs": "Frogloks"
+      },
+      {
+        "step_order": 7,
+        "description": "Gnomes",
+        "association_code": 300207,
+        "target_count": 10,
+        "target_kind": "kill",
+        "target_mobs": "Gnomes"
+      },
+      {
+        "step_order": 8,
+        "description": "Half Elves",
+        "association_code": 300204,
+        "target_count": 10,
+        "target_kind": "kill",
+        "target_mobs": "Half Elves"
+      },
+      {
+        "step_order": 9,
+        "description": "Halflings",
+        "association_code": 300206,
+        "target_count": 10,
+        "target_kind": "kill",
+        "target_mobs": "Halflings"
+      },
+      {
+        "step_order": 10,
+        "description": "High Elves",
+        "association_code": 300202,
+        "target_count": 10,
+        "target_kind": "kill",
+        "target_mobs": "High Elves"
+      },
+      {
+        "step_order": 11,
+        "description": "Humans",
+        "association_code": 300197,
+        "target_count": 10,
+        "target_kind": "kill",
+        "target_mobs": "Humans"
+      },
+      {
+        "step_order": 12,
+        "description": "Iksars",
+        "association_code": 300210,
+        "target_count": 10,
+        "target_kind": "kill",
+        "target_mobs": "Iksars"
+      },
+      {
+        "step_order": 13,
+        "description": "Ogres",
+        "association_code": 300209,
+        "target_count": 10,
+        "target_kind": "kill",
+        "target_mobs": "Ogres"
+      },
+      {
+        "step_order": 14,
+        "description": "Trolls",
+        "association_code": 300208,
+        "target_count": 10,
+        "target_kind": "kill",
+        "target_mobs": "Trolls"
+      },
+      {
+        "step_order": 15,
+        "description": "Kerran",
+        "association_code": 300212,
+        "target_count": 10,
+        "target_kind": "kill",
+        "target_mobs": "Kerran"
+      },
+      {
+        "step_order": 16,
+        "description": "Wood Elves",
+        "association_code": 300201,
+        "target_count": 10,
+        "target_kind": "kill",
+        "target_mobs": "Wood Elves"
+      }
+    ],
+    "11000029": [
+      {
+        "step_order": 1,
+        "description": "Barbarians, Drakkin, Erudites, and Humans.",
+        "association_code": 300213,
+        "target_count": 1000,
+        "target_kind": "kill",
+        "target_mobs": "Barbarians, Drakkin, Erudites, and Humans."
+      }
+    ],
+    "11000030": [
+      {
+        "step_order": 1,
+        "description": "Dark Elves, Elddar Elves, Fire Elves, Half Elves, High Elves, Sand Elves, and Wood Elves.",
+        "association_code": 300214,
+        "target_count": 1000,
+        "target_kind": "kill",
+        "target_mobs": "Dark Elves, Elddar Elves, Fire Elves, Half Elves, High Elves, Sand Elves, and Wood Elves."
+      }
+    ],
+    "11000031": [
+      {
+        "step_order": 1,
+        "description": "Coldain, Dwarves, Gnomes, and Halflings.",
+        "association_code": 300215,
+        "target_count": 1000,
+        "target_kind": "kill",
+        "target_mobs": "Coldain, Dwarves, Gnomes, and Halflings."
+      }
+    ],
+    "11000032": [
+      {
+        "step_order": 1,
+        "description": "Trolls",
+        "association_code": 300216,
+        "target_count": 1000,
+        "target_kind": "kill",
+        "target_mobs": "Trolls"
+      }
+    ],
+    "11000033": [
+      {
+        "step_order": 1,
+        "description": "Ogres",
+        "association_code": 300217,
+        "target_count": 1000,
+        "target_kind": "kill",
+        "target_mobs": "Ogres"
+      }
+    ],
+    "11000034": [
+      {
+        "step_order": 1,
+        "description": "Iksars and Kylong Iksars of Veksar.",
+        "association_code": 300218,
+        "target_count": 1000,
+        "target_kind": "kill",
+        "target_mobs": "Iksars and Kylong Iksars of Veksar."
+      }
+    ],
+    "11000035": [
+      {
+        "step_order": 1,
+        "description": "Kerrans and Vah Shir.",
+        "association_code": 300219,
+        "target_count": 1000,
+        "target_kind": "kill",
+        "target_mobs": "Kerrans and Vah Shir."
+      }
+    ],
+    "11000036": [
+      {
+        "step_order": 1,
+        "description": "Frogloks, Frogs, Guktans, and Tadpoles.",
+        "association_code": 300220,
+        "target_count": 1000,
+        "target_kind": "kill",
+        "target_mobs": "Frogloks, Frogs, Guktans, and Tadpoles."
+      }
+    ],
+    "11000037": [
+      {
+        "step_order": 1,
+        "description": "Armadillos, Bubonians, Burynai, Molerats, Rabbits, Ratmen, Rats, and Skunks.",
+        "association_code": 300221,
+        "target_count": 1000,
+        "target_kind": "kill",
+        "target_mobs": "Armadillos, Bubonians, Burynai, Molerats, Rabbits, Ratmen, Rats, and Skunks."
+      }
+    ],
+    "11000038": [
+      {
+        "step_order": 1,
+        "description": "Drachnids, Scorpions, Spiders, and Ursarachnids.",
+        "association_code": 300222,
+        "target_count": 1000,
+        "target_kind": "kill",
+        "target_mobs": "Drachnids, Scorpions, Spiders, and Ursarachnids."
+      }
+    ],
+    "11000039": [
+      {
+        "step_order": 1,
+        "description": "Chokidais, Drolvargs, Hynids, Rotdogs, Werewolves, Wolves, and Worgs.",
+        "association_code": 300223,
+        "target_count": 1000,
+        "target_kind": "kill",
+        "target_mobs": "Chokidais, Drolvargs, Hynids, Rotdogs, Werewolves, Wolves, and Worgs."
+      }
+    ],
+    "11000040": [
+      {
+        "step_order": 1,
+        "description": "Cats, Lions, Pumas, Sabertooths, Scarlet Cheetahs, Tigers, Topiary Lions, and Wrulons.",
+        "association_code": 300224,
+        "target_count": 1000,
+        "target_kind": "kill",
+        "target_mobs": "Cats, Lions, Pumas, Sabertooths, Scarlet Cheetahs, Tigers, Topiary Lions, and Wrulons."
+      }
+    ],
+    "11000041": [
+      {
+        "step_order": 1,
+        "description": "Aviaks, Blood Ravens, Cockatrices, Hawks, and Parrots.",
+        "association_code": 300225,
+        "target_count": 500,
+        "target_kind": "kill",
+        "target_mobs": "Aviaks, Blood Ravens, Cockatrices, Hawks, and Parrots."
+      }
+    ],
+    "11000042": [
+      {
+        "step_order": 1,
+        "description": "Gorillas, Holgresh, and Yetis.",
+        "association_code": 300226,
+        "target_count": 500,
+        "target_kind": "kill",
+        "target_mobs": "Gorillas, Holgresh, and Yetis."
+      }
+    ],
+    "11000044": [
+      {
+        "step_order": 1,
+        "description": "Orcs and Wereorcs.",
+        "association_code": 300228,
+        "target_count": 1000,
+        "target_kind": "kill",
+        "target_mobs": "Orcs and Wereorcs."
+      }
+    ],
+    "11000045": [
+      {
+        "step_order": 1,
+        "description": "Goblins and Nightmare Goblins.",
+        "association_code": 300229,
+        "target_count": 1000,
+        "target_kind": "kill",
+        "target_mobs": "Goblins and Nightmare Goblins."
+      }
+    ],
+    "11000046": [
+      {
+        "step_order": 1,
+        "description": "Gnolls",
+        "association_code": 300230,
+        "target_count": 1000,
+        "target_kind": "kill",
+        "target_mobs": "Gnolls"
+      }
+    ],
+    "11000047": [
+      {
+        "step_order": 1,
+        "description": "Kobolds",
+        "association_code": 300231,
+        "target_count": 1000,
+        "target_kind": "kill",
+        "target_mobs": "Kobolds"
+      }
+    ],
+    "11000048": [
+      {
+        "step_order": 1,
+        "description": "Gingerbread Men, Golems, Muddites, and Statues.",
+        "association_code": 300232,
+        "target_count": 1000,
+        "target_kind": "kill",
+        "target_mobs": "Gingerbread Men, Golems, Muddites, and Statues."
+      }
+    ],
+    "11000052": [
+      {
+        "step_order": 1,
+        "description": "True Dragons",
+        "association_code": 300236,
+        "target_count": 250,
+        "target_kind": "kill",
+        "target_mobs": "True Dragons"
+      }
+    ],
+    "11000053": [
+      {
+        "step_order": 1,
+        "description": "Dinosaurs, Dracoliches, Lesser Dragons, Drakes, Drixies, Raptors, Witherans, Wurms, and Wyverns.",
+        "association_code": 300237,
+        "target_count": 1000,
+        "target_kind": "kill",
+        "target_mobs": "Dinosaurs, Dracoliches, Lesser Dragons, Drakes, Drixies, Raptors, Witherans, Wurms, and Wyverns."
+      }
+    ],
+    "11000054": [
+      {
+        "step_order": 1,
+        "description": "Giants",
+        "association_code": 300238,
+        "target_count": 1000,
+        "target_kind": "kill",
+        "target_mobs": "Giants"
+      }
+    ],
+    "11000055": [
+      {
+        "step_order": 1,
+        "description": "Bixies, Brownies, Dryads, Fairies, and Pixies.",
+        "association_code": 300239,
+        "target_count": 1000,
+        "target_kind": "kill",
+        "target_mobs": "Bixies, Brownies, Dryads, Fairies, and Pixies."
+      }
+    ],
+    "11000056": [
+      {
+        "step_order": 1,
+        "description": "Kirins, Nightmares, Pegasus, and Unicorns.",
+        "association_code": 300240,
+        "target_count": 250,
+        "target_kind": "kill",
+        "target_mobs": "Kirins, Nightmares, Pegasus, and Unicorns."
+      }
+    ],
+    "11000057": [
+      {
+        "step_order": 1,
+        "description": "Fiends, Guardians, Planar Manifestations, Scrykin, Stormriders, Tormentors, Vegerogs, Wraiths.",
+        "association_code": 300241,
+        "target_count": 1000,
+        "target_kind": "kill",
+        "target_mobs": "Fiends, Guardians, Planar Manifestations, Scrykin, Stormriders, Tormentors, Vegerogs, Wraiths."
+      }
+    ],
+    "11000058": [
+      {
+        "step_order": 1,
+        "description": "Clockwork: Beetles, Boars, Dragons, Rats, Snakes, Spiders, Gnomeworks, Copters, and Tin Soldiers.",
+        "association_code": 300242,
+        "target_count": 1000,
+        "target_kind": "kill",
+        "target_mobs": "Clockwork: Beetles, Boars, Dragons, Rats, Snakes, Spiders, Gnomeworks, Copters, and Tin Soldiers."
+      }
+    ],
+    "11000065": [
+      {
+        "step_order": 1,
+        "description": "Humans",
+        "association_code": 300249,
+        "target_count": 100,
+        "target_kind": "kill",
+        "target_mobs": "Humans"
+      }
+    ],
+    "11000066": [
+      {
+        "step_order": 1,
+        "description": "Barbarians",
+        "association_code": 300250,
+        "target_count": 100,
+        "target_kind": "kill",
+        "target_mobs": "Barbarians"
+      }
+    ],
+    "11000067": [
+      {
+        "step_order": 1,
+        "description": "Erudites",
+        "association_code": 300251,
+        "target_count": 100,
+        "target_kind": "kill",
+        "target_mobs": "Erudites"
+      }
+    ],
+    "11000069": [
+      {
+        "step_order": 1,
+        "description": "Wood Elves",
+        "association_code": 300253,
+        "target_count": 100,
+        "target_kind": "kill",
+        "target_mobs": "Wood Elves"
+      }
+    ],
+    "11000070": [
+      {
+        "step_order": 1,
+        "description": "High Elves",
+        "association_code": 300254,
+        "target_count": 100,
+        "target_kind": "kill",
+        "target_mobs": "High Elves"
+      }
+    ],
+    "11000071": [
+      {
+        "step_order": 1,
+        "description": "Dark Elves",
+        "association_code": 300255,
+        "target_count": 100,
+        "target_kind": "kill",
+        "target_mobs": "Dark Elves"
+      }
+    ],
+    "11000072": [
+      {
+        "step_order": 1,
+        "description": "Half Elves",
+        "association_code": 300256,
+        "target_count": 100,
+        "target_kind": "kill",
+        "target_mobs": "Half Elves"
+      }
+    ],
+    "11000074": [
+      {
+        "step_order": 1,
+        "description": "Dwarves",
+        "association_code": 300258,
+        "target_count": 100,
+        "target_kind": "kill",
+        "target_mobs": "Dwarves"
+      }
+    ],
+    "11000076": [
+      {
+        "step_order": 1,
+        "description": "Halflings",
+        "association_code": 300260,
+        "target_count": 100,
+        "target_kind": "kill",
+        "target_mobs": "Halflings"
+      }
+    ],
+    "11000077": [
+      {
+        "step_order": 1,
+        "description": "Gnomes",
+        "association_code": 300261,
+        "target_count": 100,
+        "target_kind": "kill",
+        "target_mobs": "Gnomes"
+      }
+    ],
+    "11000078": [
+      {
+        "step_order": 1,
+        "description": "Trolls",
+        "association_code": 300262,
+        "target_count": 100,
+        "target_kind": "kill",
+        "target_mobs": "Trolls"
+      }
+    ],
+    "11000079": [
+      {
+        "step_order": 1,
+        "description": "Ogres",
+        "association_code": 300263,
+        "target_count": 100,
+        "target_kind": "kill",
+        "target_mobs": "Ogres"
+      }
+    ],
+    "11000080": [
+      {
+        "step_order": 1,
+        "description": "Iksars",
+        "association_code": 300264,
+        "target_count": 100,
+        "target_kind": "kill",
+        "target_mobs": "Iksars"
+      }
+    ],
+    "11000083": [
+      {
+        "step_order": 1,
+        "description": "Frogloks and Tadpoles.",
+        "association_code": 300267,
+        "target_count": 100,
+        "target_kind": "kill",
+        "target_mobs": "Frogloks and Tadpoles."
+      }
+    ],
+    "11000086": [
+      {
+        "step_order": 1,
+        "description": "Kerrans",
+        "association_code": 300270,
+        "target_count": 50,
+        "target_kind": "kill",
+        "target_mobs": "Kerrans"
+      }
+    ],
+    "11000087": [
+      {
+        "step_order": 1,
+        "description": "Bats and Werebats.",
+        "association_code": 300271,
+        "target_count": 100,
+        "target_kind": "kill",
+        "target_mobs": "Bats and Werebats."
+      }
+    ],
+    "11000088": [
+      {
+        "step_order": 1,
+        "description": "Rats and Molerats.",
+        "association_code": 300272,
+        "target_count": 100,
+        "target_kind": "kill",
+        "target_mobs": "Rats and Molerats."
+      }
+    ],
+    "11000089": [
+      {
+        "step_order": 1,
+        "description": "Armadillos",
+        "association_code": 300273,
+        "target_count": 50,
+        "target_kind": "kill",
+        "target_mobs": "Armadillos"
+      }
+    ],
+    "11000090": [
+      {
+        "step_order": 1,
+        "description": "Skunks",
+        "association_code": 300274,
+        "target_count": 5,
+        "target_kind": "kill",
+        "target_mobs": "Skunks"
+      }
+    ],
+    "11000092": [
+      {
+        "step_order": 1,
+        "description": "Ratmen",
+        "association_code": 300276,
+        "target_count": 100,
+        "target_kind": "kill",
+        "target_mobs": "Ratmen"
+      }
+    ],
+    "11000095": [
+      {
+        "step_order": 1,
+        "description": "Beetles, Insects, Lightcrawlers, Shik'Nars, and Underbulks.",
+        "association_code": 300279,
+        "target_count": 100,
+        "target_kind": "kill",
+        "target_mobs": "Beetles, Insects, Lightcrawlers, Shik'Nars, and Underbulks."
+      }
+    ],
+    "11000096": [
+      {
+        "step_order": 1,
+        "description": "Leeches, Ticks, and Vacuum Worms.",
+        "association_code": 300280,
+        "target_count": 100,
+        "target_kind": "kill",
+        "target_mobs": "Leeches, Ticks, and Vacuum Worms."
+      }
+    ],
+    "11000099": [
+      {
+        "step_order": 1,
+        "description": "Butterflies, Flies, Malarians, Mosquitoes, Tsetsians, and Wasps.",
+        "association_code": 300283,
+        "target_count": 100,
+        "target_kind": "kill",
+        "target_mobs": "Butterflies, Flies, Malarians, Mosquitoes, Tsetsians, and Wasps."
+      }
+    ],
+    "11000100": [
+      {
+        "step_order": 1,
+        "description": "Scorpions and Spiders.",
+        "association_code": 300284,
+        "target_count": 100,
+        "target_kind": "kill",
+        "target_mobs": "Scorpions and Spiders."
+      }
+    ],
+    "11000103": [
+      {
+        "step_order": 1,
+        "description": "Snakes",
+        "association_code": 300287,
+        "target_count": 100,
+        "target_kind": "kill",
+        "target_mobs": "Snakes"
+      }
+    ],
+    "11000104": [
+      {
+        "step_order": 1,
+        "description": "Skeletons",
+        "association_code": 300288,
+        "target_count": 100,
+        "target_kind": "kill",
+        "target_mobs": "Skeletons"
+      }
+    ],
+    "11000105": [
+      {
+        "step_order": 1,
+        "description": "Vampires",
+        "association_code": 300289,
+        "target_count": 100,
+        "target_kind": "kill",
+        "target_mobs": "Vampires"
+      }
+    ],
+    "11000106": [
+      {
+        "step_order": 1,
+        "description": "Hags, Ghouls, and Zombies.",
+        "association_code": 300290,
+        "target_count": 100,
+        "target_kind": "kill",
+        "target_mobs": "Hags, Ghouls, and Zombies."
+      }
+    ],
+    "11000107": [
+      {
+        "step_order": 1,
+        "description": "Mummies",
+        "association_code": 300291,
+        "target_count": 50,
+        "target_kind": "kill",
+        "target_mobs": "Mummies"
+      }
+    ],
+    "11000108": [
+      {
+        "step_order": 1,
+        "description": "Ghouls",
+        "association_code": 300292,
+        "target_count": 50,
+        "target_kind": "kill",
+        "target_mobs": "Ghouls"
+      }
+    ],
+    "11000109": [
+      {
+        "step_order": 1,
+        "description": "Animated Hands",
+        "association_code": 300293,
+        "target_count": 25,
+        "target_kind": "kill",
+        "target_mobs": "Animated Hands"
+      }
+    ],
+    "11000110": [
+      {
+        "step_order": 1,
+        "description": "Banshees, Ghosts, Spectres, Spirits, and Wisps.",
+        "association_code": 300294,
+        "target_count": 100,
+        "target_kind": "kill",
+        "target_mobs": "Banshees, Ghosts, Spectres, Spirits, and Wisps."
+      }
+    ],
+    "11000113": [
+      {
+        "step_order": 1,
+        "description": "Chokidais, Drolvargs, Hynids, Rotdogs, Scaled Wolves, Sonic Wolves, Werewolves, Wolves, and Worgs.",
+        "association_code": 300297,
+        "target_count": 100,
+        "target_kind": "kill",
+        "target_mobs": "Chokidais, Drolvargs, Hynids, Rotdogs, Scaled Wolves, Sonic Wolves, Werewolves, Wolves, and Worgs."
+      }
+    ],
+    "11000114": [
+      {
+        "step_order": 1,
+        "description": "Cats, Lions, Pumas, Sabertooths, Scarlet Cheetahs, Tigers, Topiary Lions, and Wrulons.",
+        "association_code": 300298,
+        "target_count": 100,
+        "target_kind": "kill",
+        "target_mobs": "Cats, Lions, Pumas, Sabertooths, Scarlet Cheetahs, Tigers, Topiary Lions, and Wrulons."
+      }
+    ],
+    "11000115": [
+      {
+        "step_order": 1,
+        "description": "Aviaks, Blood Ravens, Cockatrices, Hawks, and Parrots.",
+        "association_code": 300299,
+        "target_count": 100,
+        "target_kind": "kill",
+        "target_mobs": "Aviaks, Blood Ravens, Cockatrices, Hawks, and Parrots."
+      }
+    ],
+    "11000116": [
+      {
+        "step_order": 1,
+        "description": "Gorillas, Holgresh, and Yetis.",
+        "association_code": 300300,
+        "target_count": 100,
+        "target_kind": "kill",
+        "target_mobs": "Gorillas, Holgresh, and Yetis."
+      }
+    ],
+    "11000117": [
+      {
+        "step_order": 1,
+        "description": "Bears, Kodiaks, Owlbears, and Pandas.",
+        "association_code": 300301,
+        "target_count": 100,
+        "target_kind": "kill",
+        "target_mobs": "Bears, Kodiaks, Owlbears, and Pandas."
+      }
+    ],
+    "11000118": [
+      {
+        "step_order": 1,
+        "description": "Elephants and Mammoths.",
+        "association_code": 300302,
+        "target_count": 100,
+        "target_kind": "kill",
+        "target_mobs": "Elephants and Mammoths."
+      }
+    ],
+    "11000120": [
+      {
+        "step_order": 1,
+        "description": "Alligators, Basilisks, and Crocodiles.",
+        "association_code": 300304,
+        "target_count": 100,
+        "target_kind": "kill",
+        "target_mobs": "Alligators, Basilisks, and Crocodiles."
+      }
+    ],
+    "11000128": [
+      {
+        "step_order": 1,
+        "description": "Fishes, Piranhas, Seahorses, Sharks, Swordfishes, and Wetfang Minnows.",
+        "association_code": 300312,
+        "target_count": 100,
+        "target_kind": "kill",
+        "target_mobs": "Fishes, Piranhas, Seahorses, Sharks, Swordfishes, and Wetfang Minnows."
+      }
+    ],
+    "11000130": [
+      {
+        "step_order": 1,
+        "description": "Orcs and Wereorcs.",
+        "association_code": 300314,
+        "target_count": 100,
+        "target_kind": "kill",
+        "target_mobs": "Orcs and Wereorcs."
+      }
+    ],
+    "11000131": [
+      {
+        "step_order": 1,
+        "description": "Goblins and Nightmare Goblins.",
+        "association_code": 300315,
+        "target_count": 100,
+        "target_kind": "kill",
+        "target_mobs": "Goblins and Nightmare Goblins."
+      }
+    ],
+    "11000132": [
+      {
+        "step_order": 1,
+        "description": "Gnolls",
+        "association_code": 300316,
+        "target_count": 100,
+        "target_kind": "kill",
+        "target_mobs": "Gnolls"
+      }
+    ],
+    "11000133": [
+      {
+        "step_order": 1,
+        "description": "Kobolds",
+        "association_code": 300317,
+        "target_count": 100,
+        "target_kind": "kill",
+        "target_mobs": "Kobolds"
+      }
+    ],
+    "11000134": [
+      {
+        "step_order": 1,
+        "description": "Lizard Men",
+        "association_code": 300318,
+        "target_count": 100,
+        "target_kind": "kill",
+        "target_mobs": "Lizard Men"
+      }
+    ],
+    "11000140": [
+      {
+        "step_order": 1,
+        "description": "Kedge",
+        "association_code": 300324,
+        "target_count": 50,
+        "target_kind": "kill",
+        "target_mobs": "Kedge"
+      }
+    ],
+    "11000141": [
+      {
+        "step_order": 1,
+        "description": "Nagas, Mermaids, Nymphs, and Sirens.",
+        "association_code": 300325,
+        "target_count": 50,
+        "target_kind": "kill",
+        "target_mobs": "Nagas, Mermaids, Nymphs, and Sirens."
+      }
+    ],
+    "11000142": [
+      {
+        "step_order": 1,
+        "description": "Gargoyles",
+        "association_code": 300326,
+        "target_count": 100,
+        "target_kind": "kill",
+        "target_mobs": "Gargoyles"
+      }
+    ],
+    "11000143": [
+      {
+        "step_order": 1,
+        "description": "Scarecrows and Totems.",
+        "association_code": 300327,
+        "target_count": 50,
+        "target_kind": "kill",
+        "target_mobs": "Scarecrows and Totems."
+      }
+    ],
+    "11000144": [
+      {
+        "step_order": 1,
+        "description": "Treants",
+        "association_code": 300328,
+        "target_count": 100,
+        "target_kind": "kill",
+        "target_mobs": "Treants"
+      }
+    ],
+    "11000145": [
+      {
+        "step_order": 1,
+        "description": "Sporalis",
+        "association_code": 300329,
+        "target_count": 100,
+        "target_kind": "kill",
+        "target_mobs": "Sporalis"
+      }
+    ],
+    "11000146": [
+      {
+        "step_order": 1,
+        "description": "Dracoliches, Water Dragons, and Witherans.",
+        "association_code": 300330,
+        "target_count": 100,
+        "target_kind": "kill",
+        "target_mobs": "Dracoliches, Water Dragons, and Witherans."
+      }
+    ],
+    "11000148": [
+      {
+        "step_order": 1,
+        "description": "Drakes, Drixies, and Fay Drakes.",
+        "association_code": 300332,
+        "target_count": 100,
+        "target_kind": "kill",
+        "target_mobs": "Drakes, Drixies, and Fay Drakes."
+      }
+    ],
+    "11000149": [
+      {
+        "step_order": 1,
+        "description": "Giants",
+        "association_code": 300333,
+        "target_count": 100,
+        "target_kind": "kill",
+        "target_mobs": "Giants"
+      }
+    ],
+    "11000150": [
+      {
+        "step_order": 1,
+        "description": "Dryads, Fairies, and Pixies.",
+        "association_code": 300334,
+        "target_count": 100,
+        "target_kind": "kill",
+        "target_mobs": "Dryads, Fairies, and Pixies."
+      }
+    ],
+    "11000151": [
+      {
+        "step_order": 1,
+        "description": "Bixies",
+        "association_code": 300335,
+        "target_count": 100,
+        "target_kind": "kill",
+        "target_mobs": "Bixies"
+      }
+    ],
+    "11000152": [
+      {
+        "step_order": 1,
+        "description": "Brownies",
+        "association_code": 300336,
+        "target_count": 100,
+        "target_kind": "kill",
+        "target_mobs": "Brownies"
+      }
+    ],
+    "11000153": [
+      {
+        "step_order": 1,
+        "description": "Centaurs",
+        "association_code": 300337,
+        "target_count": 100,
+        "target_kind": "kill",
+        "target_mobs": "Centaurs"
+      }
+    ],
+    "11000155": [
+      {
+        "step_order": 1,
+        "description": "Minotaurs and Tizmak.",
+        "association_code": 300339,
+        "target_count": 100,
+        "target_kind": "kill",
+        "target_mobs": "Minotaurs and Tizmak."
+      }
+    ],
+    "11000156": [
+      {
+        "step_order": 1,
+        "description": "Griffons, Griffennes, and Griffins.",
+        "association_code": 300340,
+        "target_count": 100,
+        "target_kind": "kill",
+        "target_mobs": "Griffons, Griffennes, and Griffins."
+      }
+    ],
+    "11000158": [
+      {
+        "step_order": 1,
+        "description": "Sphinxes",
+        "association_code": 300342,
+        "target_count": 10,
+        "target_kind": "kill",
+        "target_mobs": "Sphinxes"
+      }
+    ],
+    "11000159": [
+      {
+        "step_order": 1,
+        "description": "Djinns and Efreetis.",
+        "association_code": 300343,
+        "target_count": 100,
+        "target_kind": "kill",
+        "target_mobs": "Djinns and Efreetis."
+      }
+    ],
+    "11000160": [
+      {
+        "step_order": 1,
+        "description": "Imps and Mephits.",
+        "association_code": 300344,
+        "target_count": 100,
+        "target_kind": "kill",
+        "target_mobs": "Imps and Mephits."
+      }
+    ],
+    "11000161": [
+      {
+        "step_order": 1,
+        "description": "Elementals",
+        "association_code": 300345,
+        "target_count": 100,
+        "target_kind": "kill",
+        "target_mobs": "Elementals"
+      }
+    ],
+    "11000162": [
+      {
+        "step_order": 1,
+        "description": "Dervishes",
+        "association_code": 300346,
+        "target_count": 100,
+        "target_kind": "kill",
+        "target_mobs": "Dervishes"
+      }
+    ],
+    "11000164": [
+      {
+        "step_order": 1,
+        "description": "Tentacle Terrors",
+        "association_code": 300348,
+        "target_count": 50,
+        "target_kind": "kill",
+        "target_mobs": "Tentacle Terrors"
+      }
+    ],
+    "11000165": [
+      {
+        "step_order": 1,
+        "description": "Amygdalans",
+        "association_code": 300349,
+        "target_count": 50,
+        "target_kind": "kill",
+        "target_mobs": "Amygdalans"
+      }
+    ],
+    "11000168": [
+      {
+        "step_order": 1,
+        "description": "Evil Eyes",
+        "association_code": 300352,
+        "target_count": 100,
+        "target_kind": "kill",
+        "target_mobs": "Evil Eyes"
+      }
+    ],
+    "11000170": [
+      {
+        "step_order": 1,
+        "description": "Gelatinous Cubes",
+        "association_code": 300354,
+        "target_count": 50,
+        "target_kind": "kill",
+        "target_mobs": "Gelatinous Cubes"
+      }
+    ],
+    "11000171": [
+      {
+        "step_order": 1,
+        "description": "Clockwork: Beetles, Boars, Dragons, Rats, Snakes, Spiders, Gnomeworks, Copters, and Tin Soldiers.",
+        "association_code": 300355,
+        "target_count": 100,
+        "target_kind": "kill",
+        "target_mobs": "Clockwork: Beetles, Boars, Dragons, Rats, Snakes, Spiders, Gnomeworks, Copters, and Tin Soldiers."
+      }
+    ]
+  }
+}

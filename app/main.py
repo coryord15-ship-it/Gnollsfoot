@@ -562,8 +562,24 @@ def _on_zone(app: AppState, zone: str):
 
 def _on_kill(app: AppState, mob: str):
     """Player slew a mob ('You have slain <mob>!') — feeds the matcher's `kill`
-    trigger type. No DB write, no alert of its own beyond a completed step."""
+    trigger type and slayer achievement counters for journaled achievements."""
     _handle_step_completions(app, app.quest_matcher.on_kill(mob))
+    # T1.8 — slayer kill targets (log-only local progress)
+    try:
+        from app import slayer_progress
+        achs = getattr(app, "_achievement_journal", None) or []
+        if achs:
+            prog = getattr(app, "_slayer_progress", None)
+            if prog is None:
+                prog = slayer_progress.load_progress()
+                app._slayer_progress = prog
+            advanced = slayer_progress.on_kill(mob, achs, prog)
+            if advanced:
+                win = app.main_window
+                if win is not None:
+                    win.safe_after(0, win._refresh_achievements)
+    except Exception:
+        log.debug("slayer progress on_kill failed", exc_info=True)
 
 
 def _start_quest_sightings(app: AppState):

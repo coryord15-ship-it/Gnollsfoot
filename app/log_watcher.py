@@ -326,6 +326,50 @@ class LogWatcher:
                 except Exception: log.exception("on_turn_in callback error")
             return
 
+    def rescan_recent(
+        self,
+        max_bytes: int = 2_000_000,
+        max_lines: int = 80_000,
+    ) -> list[str]:
+        """Read the last ~max_bytes of every open character log; return raw lines.
+
+        Used for journal catch-up (loot + kills) without moving the live tail.
+        """
+        lines: list[str] = []
+        paths = list(self._matching_files()) if hasattr(self, "_matching_files") else []
+        if not paths and self._dir:
+            try:
+                paths = _glob.glob(os.path.join(self._dir, self._glob))
+            except Exception:
+                paths = []
+        for p in paths:
+            try:
+                size = os.path.getsize(p)
+                start = max(0, size - max_bytes)
+                with open(p, "r", encoding="utf-8", errors="replace") as f:
+                    if start:
+                        f.seek(start)
+                        f.readline()  # drop partial first line
+                    for i, line in enumerate(f):
+                        if i >= max_lines:
+                            break
+                        lines.append(line.rstrip("\n"))
+            except Exception:
+                log.debug("rescan read failed for %s", p, exc_info=True)
+        return lines
+
+    def parse_loot_from_lines(self, lines: list[str]) -> list:
+        """Parse loot events from historical lines (catch-up)."""
+        out = []
+        for line in lines:
+            try:
+                evt = self._loot_parser.parse(line)
+                if evt:
+                    out.append(evt)
+            except Exception:
+                pass
+        return out
+
 
 class _FileHandler(FileSystemEventHandler):
     def __init__(self, watcher: LogWatcher):
