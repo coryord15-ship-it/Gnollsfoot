@@ -11,18 +11,18 @@ block_cipher = None
 
 # CustomTkinter ships theme JSON + assets that must be bundled or the app
 # crashes at launch. collect_all grabs its data, binaries, and submodules.
+# pygame was only used for broken alert sounds — no longer shipped.
 _ctk_datas, _ctk_bins, _ctk_hidden = collect_all('customtkinter')
-_pg_datas,  _pg_bins,  _pg_hidden  = collect_all('pygame')
 
 a = Analysis(
     ['app/main.py'],
     pathex=['.'],
-    binaries=_ctk_bins + _pg_bins,
+    binaries=_ctk_bins,
     datas=[
         ('assets', 'assets'),
         ('config/settings.json', 'config'),
-    ] + _ctk_datas + _pg_datas,
-    hiddenimports=_ctk_hidden + _pg_hidden + [
+    ] + _ctk_datas,
+    hiddenimports=_ctk_hidden + [
         'customtkinter',
         'pystray',
         'pystray._win32',
@@ -56,7 +56,7 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=['torch', 'transformers', 'ollama'],
+    excludes=['torch', 'transformers', 'ollama', 'pygame'],
     win_no_prefer_redirects=False,
     win_private_assemblies=False,
     cipher=block_cipher,

@@ -1,5 +1,4 @@
 customtkinter>=5.2.2
-pygame==2.6.1
 Pillow>=10.0.0
 pystray>=0.19.5
 watchdog>=3.0.0

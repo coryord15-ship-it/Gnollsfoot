@@ -64,13 +64,11 @@ class MainWindow(ctk.CTk):
         if os.path.isfile(ico):
             self.after(300, lambda: self._safe_iconbitmap(ico))
 
-        self._overlay = None
+        self._overlay = None  # OverlayManager — owns pop-out bubbles (no dock hub)
         self._shutting_down = False
         self._build()
-
-        # Re-open the detached overlay if the user had it enabled.
-        if self._app.config.get("overlay_enabled"):
-            self.after(600, lambda: self.toggle_overlay(True))
+        # Always create the bubble manager (Journal tab pop-outs). No standalone dock window.
+        self._ensure_overlay_manager()
 
     def _safe_iconbitmap(self, ico):
         try:
@@ -91,24 +89,45 @@ class MainWindow(ctk.CTk):
         except RuntimeError:
             pass  # main loop already gone
 
+    def _ensure_overlay_manager(self):
+        """Lazy-create the OverlayManager that owns pop-out quest bubbles."""
+        if getattr(self, "_overlay", None) is not None:
+            return self._overlay
+        try:
+            from app.ui.journal_overlay import OverlayManager
+            mgr = OverlayManager(self, self._app)
+            mgr.set_on_change(lambda: self.safe_after(0, self._on_overlay_change))
+            self._overlay = mgr
+            self._app.overlay_window = mgr
+            return mgr
+        except Exception:
+            log.exception("overlay manager init failed")
+            return None
+
+    def _on_overlay_change(self):
+        """Re-render Journal when a quest is popped out or docked."""
+        if getattr(self, "_journal_subtab", "Quests") == "Quests":
+            # Soft refresh from in-memory journal if available (no network).
+            quests = getattr(self._app, "_journal_quests", None)
+            if quests is not None:
+                self._render_journal(quests)
+            else:
+                self._refresh_journal()
+
     def toggle_overlay(self, enabled: bool):
-        """Spawn or destroy the detached always-on-top Quest overlay (a child window)."""
+        """Legacy Settings switch: show/lift open bubbles, or close all.
+
+        There is no Quest Dock hub window anymore — quests live in the Journal tab
+        and pop out individually. `enabled=True` ensures the manager exists and
+        re-surfaces any open bubbles; `enabled=False` docks (closes) them all.
+        """
+        mgr = self._ensure_overlay_manager()
+        if mgr is None:
+            return
         if enabled:
-            if getattr(self, "_overlay", None) is not None and self._overlay.winfo_exists():
-                self._overlay.deiconify(); self._overlay.lift()
-                return
-            try:
-                from app.ui.journal_overlay import JournalOverlay
-                self._overlay = JournalOverlay(self, self._app)
-                self._app.overlay_window = self._overlay
-            except Exception:
-                log.exception("overlay open failed")
+            mgr.deiconify()
         else:
-            ov = getattr(self, "_overlay", None)
-            if ov is not None and ov.winfo_exists():
-                ov.destroy()
-            self._overlay = None
-            self._app.overlay_window = None
+            mgr.close_all()
 
     def _build(self):
         # Header
@@ -414,13 +433,56 @@ class MainWindow(ctk.CTk):
 
     # journal_view's default theme is already this app's dark-gold palette, so no
     # override dict is needed here — the Officer Console passes its own steel-cyan one.
-    def _journal_delete_header(self, card, title_row, q):
+    def _journal_quest_header(self, card, title_row, q):
+        """Trash + Pop out / Dock controls on each journal quest card."""
         ctk.CTkButton(
             title_row, text="🗑", width=30, height=26,
             fg_color="transparent", text_color=theme.TEXT_MUTED,
             hover_color=theme.DANGER, font=theme.FONT_BODY,
             command=lambda qq=q: self._delete_quest(qq),
         ).pack(side="right")
+        qid = q.get("id")
+        mgr = self._ensure_overlay_manager()
+        popped = bool(mgr and mgr.is_popped(qid))
+        if popped:
+            ctk.CTkButton(
+                title_row, text="Dock", width=56, height=26,
+                fg_color=theme.PANEL_HOVER, hover_color=theme.GOLD,
+                text_color=theme.TEXT_PRIMARY, font=theme.FONT_BODY_SMALL,
+                corner_radius=8,
+                command=lambda i=qid: self._dock_quest(i),
+            ).pack(side="right", padx=(0, 4))
+        else:
+            ctk.CTkButton(
+                title_row, text="Pop out", width=72, height=26,
+                fg_color=theme.PANEL_HOVER, hover_color=theme.GOLD,
+                text_color=theme.TEXT_PRIMARY, font=theme.FONT_BODY_SMALL,
+                corner_radius=8,
+                command=lambda qq=q: self._pop_out_quest(qq),
+            ).pack(side="right", padx=(0, 4))
+
+    def _pop_out_quest(self, q):
+        """Open this journal quest as a standalone always-on-top overlay (max 5)."""
+        from app.ui.journal_overlay import MAX_BUBBLES
+        mgr = self._ensure_overlay_manager()
+        if mgr is None:
+            return
+        if not mgr.pop_out(q):
+            import tkinter.messagebox as _mb
+            n = len(mgr.popped_ids())
+            if n >= MAX_BUBBLES:
+                _mb.showinfo(
+                    "Pop-out limit",
+                    f"You can have up to {MAX_BUBBLES} quest windows open.\n"
+                    "Dock one first, then pop out another.",
+                    parent=self,
+                )
+
+    def _dock_quest(self, qid):
+        """Close the pop-out window and restore the quest to the Journal tab only."""
+        mgr = self._ensure_overlay_manager()
+        if mgr is not None:
+            mgr.dock(qid)
 
     def _render_journal_quest(self, q):
         matcher = getattr(self._app, "quest_matcher", None)
@@ -438,8 +500,16 @@ class MainWindow(ctk.CTk):
             self._journal_scroll, q, matcher, prog, given, theme=jv_theme,
             on_toggle_step=self._toggle_step,
             on_copy=self._copy_to_clipboard,
-            extra_header=lambda card, title_row: self._journal_delete_header(card, title_row, q),
+            extra_header=lambda card, title_row: self._journal_quest_header(card, title_row, q),
         )
+        # Status line when already popped out
+        mgr = getattr(self, "_overlay", None)
+        if mgr is not None and mgr.is_popped(q.get("id")):
+            note = ctk.CTkLabel(
+                card, text="  ● open as overlay — drag near others to snap · Shift+drag to unsnap",
+                font=theme.FONT_BODY_SMALL, text_color=theme.GOLD, anchor="w",
+            )
+            note.pack(anchor="w", padx=10, pady=(0, 6))
         self._journal_widgets.append(card)
 
     def _copy_to_clipboard(self, text: str):
@@ -470,6 +540,8 @@ class MainWindow(ctk.CTk):
                             f"Remove “{name}” from your journal?", parent=self):
             return
         qid = q.get("id")
+        # Dock any open pop-out for this quest first.
+        self._dock_quest(qid)
         # Drop it locally right away so the UI feels instant.
         try:
             self._app._journal_quests = [

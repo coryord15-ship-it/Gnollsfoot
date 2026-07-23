@@ -183,35 +183,23 @@ class SettingsTab(ctk.CTkFrame):
             font=theme.FONT_BODY_SMALL, text_color=theme.TEXT_MUTED, anchor="w",
         ).pack(anchor="w", pady=(0, theme.PAD_SM))
 
-        self._overlay_var = ctk.BooleanVar(value=self._app.config.get("overlay_enabled", False))
-        ctk.CTkSwitch(
-            scroll, text="Enable Overlay Window", variable=self._overlay_var,
-            text_color=theme.TEXT_PRIMARY, font=theme.FONT_BODY,
-            progress_color=theme.GOLD, button_color=theme.GOLD,
-            command=self._toggle_overlay,
+        ctk.CTkLabel(
+            scroll,
+            text="Quest overlays: open the Journal tab and click Pop out on up to 5 quests. "
+                 "Drag windows near each other to snap into a movable cluster; "
+                 "Shift+drag a window to break it off the cluster. "
+                 "Dock returns a quest to the Journal.",
+            font=theme.FONT_BODY_SMALL, text_color=theme.TEXT_MUTED, anchor="w",
+            wraplength=700, justify="left",
         ).pack(anchor="w", pady=(0, theme.PAD_SM))
+        # Kept for config back-compat (older installs may still have these keys).
+        self._overlay_var = ctk.BooleanVar(value=True)
         self._overlay_borderless_var = ctk.BooleanVar(
-            value=self._app.config.get("overlay_borderless", False)
+            value=self._app.config.get("overlay_borderless", True)
         )
-        ctk.CTkSwitch(
-            scroll, text="Borderless overlay (slim title bar)",
-            variable=self._overlay_borderless_var,
-            text_color=theme.TEXT_PRIMARY, font=theme.FONT_BODY,
-            progress_color=theme.GOLD, button_color=theme.GOLD,
-            command=self._toggle_overlay,
-        ).pack(anchor="w", pady=(0, theme.PAD_SM))
         self._overlay_clickthrough_var = ctk.BooleanVar(
             value=self._app.config.get("overlay_click_through", True)
         )
-        ctk.CTkSwitch(
-            scroll, text="Overlay click-through (clicks pass to the game unless on text/buttons)",
-            variable=self._overlay_clickthrough_var,
-            text_color=theme.TEXT_PRIMARY, font=theme.FONT_BODY,
-            progress_color=theme.GOLD, button_color=theme.GOLD,
-            command=lambda: self._app.config.update(
-                {"overlay_click_through": bool(self._overlay_clickthrough_var.get())}
-            ),
-        ).pack(anchor="w", pady=(0, theme.PAD_SM))
         self._overlay_opacity_var = ctk.IntVar(
             value=int(float(self._app.config.get("overlay_opacity", 0.92)) * 100)
         )
@@ -222,7 +210,7 @@ class SettingsTab(ctk.CTkFrame):
             font=theme.FONT_BODY, text_color=theme.TEXT_SECONDARY,
         )
         ctk.CTkLabel(
-            op_row, text="Overlay opacity", font=theme.FONT_BODY,
+            op_row, text="Pop-out window opacity", font=theme.FONT_BODY,
             text_color=theme.TEXT_PRIMARY, anchor="w",
         ).pack(side="left")
         op_val.pack(side="right")
@@ -240,43 +228,6 @@ class SettingsTab(ctk.CTkFrame):
             log.exception("overlay typography controls failed to build")
             self._overlay_font_var = ctk.StringVar(value="Segoe UI")
             self._overlay_font_scale_pct_var = ctk.IntVar(value=100)
-
-        self._section(scroll, "Alerts")
-        self._duration_var = ctk.IntVar(value=self._app.config.get("alert_duration_seconds", 10))
-        self._slider_row(
-            scroll, "Auto-dismiss (seconds)", self._duration_var, 3, 30,
-        )
-        self._audio_var = ctk.BooleanVar(value=self._app.config.get("audio_enabled", True))
-        self._audio_switch = ctk.CTkSwitch(
-            scroll,
-            text="Sound alerts: ON" if self._audio_var.get() else "Sound alerts: OFF",
-            variable=self._audio_var,
-            text_color=theme.TEXT_PRIMARY, font=theme.FONT_BODY,
-            progress_color=theme.GOLD, button_color=theme.GOLD,
-        )
-        self._audio_switch.pack(anchor="w", pady=(0, theme.PAD_SM))
-        self._audio_var.trace_add("write", lambda *_: self._audio_switch.configure(
-            text="Sound alerts: ON" if self._audio_var.get() else "Sound alerts: OFF"
-        ))
-
-        self._volume_var = ctk.IntVar(value=self._app.config.get("audio_volume", 50))
-        vol_row = ctk.CTkFrame(scroll, fg_color="transparent")
-        vol_row.pack(fill="x", pady=(0, theme.PAD))
-        vol_val = ctk.CTkLabel(
-            vol_row, text=f"{self._volume_var.get()}%",
-            font=theme.FONT_BODY, text_color=theme.TEXT_SECONDARY, width=36,
-        )
-        ctk.CTkLabel(
-            vol_row, text="Alert volume",
-            font=theme.FONT_BODY, text_color=theme.TEXT_PRIMARY, anchor="w",
-        ).pack(side="left")
-        vol_val.pack(side="right")
-        ctk.CTkSlider(
-            vol_row, variable=self._volume_var, from_=0, to=100,
-            button_color=theme.GOLD, progress_color=theme.GOLD,
-            fg_color=theme.PANEL,
-            command=lambda v: vol_val.configure(text=f"{int(v)}%"),
-        ).pack(side="right", padx=theme.PAD, fill="x", expand=True)
 
         self._export_dir_var = ctk.StringVar(
             value=self._app.config.get("export_directory", "")
@@ -357,12 +308,12 @@ class SettingsTab(ctk.CTkFrame):
     # ── Helpers ──────────────────────────────────────────────────────────────
 
     def _build_overlay_typography(self, scroll):
-        """Font family + size for Quest Dock / bubbles. Isolated so failures don't blank Settings."""
+        """Font family + size for pop-out quest windows. Isolated so failures don't blank Settings."""
         families = list(getattr(theme, "FONT_FAMILIES", None) or (
             "Segoe UI", "Helvetica", "Georgia", "Consolas"))
         ctk.CTkLabel(
             scroll,
-            text="Overlay font (hub + quest bubbles). Helvetica uses Arial on Windows if needed.",
+            text="Pop-out font (quest overlay windows). Helvetica uses Arial on Windows if needed.",
             font=theme.FONT_BODY_SMALL, text_color=theme.TEXT_MUTED, anchor="w",
         ).pack(anchor="w", pady=(theme.PAD_SM, 2))
 
@@ -431,44 +382,18 @@ class SettingsTab(ctk.CTkFrame):
             font=theme.FONT_SUBHEADER, text_color=theme.GOLD, anchor="w",
         ).pack(anchor="w", pady=(theme.PAD, theme.PAD_SM))
 
-    def _slider_row(self, parent, label: str, var, from_: int, to: int):
-        row = ctk.CTkFrame(parent, fg_color="transparent")
-        row.pack(fill="x", pady=(0, theme.PAD))
-        val_label = ctk.CTkLabel(
-            row, text=f"{var.get()}s",
-            font=theme.FONT_BODY, text_color=theme.TEXT_SECONDARY, width=32,
-        )
-        ctk.CTkLabel(
-            row, text=label,
-            font=theme.FONT_BODY, text_color=theme.TEXT_PRIMARY, anchor="w",
-        ).pack(side="left")
-        val_label.pack(side="right")
-        slider = ctk.CTkSlider(
-            row, variable=var, from_=from_, to=to,
-            button_color=theme.GOLD, progress_color=theme.GOLD,
-            fg_color=theme.PANEL,
-            command=lambda v: val_label.configure(text=f"{int(v)}s"),
-        )
-        slider.pack(side="right", padx=theme.PAD, fill="x", expand=True)
-
     def _toggle_overlay(self):
+        # No dock hub anymore — opacity/typography apply to open pop-outs only.
         cfg = self._app.config
-        cfg["overlay_enabled"] = bool(self._overlay_var.get())
-        cfg["overlay_borderless"] = bool(self._overlay_borderless_var.get())
         cfg["overlay_opacity"] = round(self._overlay_opacity_var.get() / 100.0, 2)
-        self._app.save_config()
-        mw = getattr(self._app, "main_window", None)
-        if mw is None or not hasattr(mw, "toggle_overlay"):
-            return
-        if cfg["overlay_enabled"]:
-            # Recreate so borderless / opacity changes take effect right away.
-            mw.toggle_overlay(False)
-            mw.toggle_overlay(True)
-        else:
-            mw.toggle_overlay(False)
+        try:
+            self._app.save_config()
+        except Exception:
+            pass
+        self._apply_overlay_opacity(self._overlay_opacity_var.get())
 
     def _apply_overlay_typography(self):
-        """Live-update overlay hub + bubbles when font family/scale changes."""
+        """Live-update all pop-out quest windows when font family/scale changes."""
         fam = "Segoe UI"
         if hasattr(self, "_overlay_font_var"):
             try:
@@ -493,28 +418,32 @@ class SettingsTab(ctk.CTkFrame):
         except Exception:
             log.debug("save_config during typography failed", exc_info=True)
         ov = getattr(self._app, "overlay_window", None)
-        if ov is not None:
+        if ov is not None and hasattr(ov, "apply_typography"):
             try:
-                if ov.winfo_exists() and hasattr(ov, "apply_typography"):
-                    ov.apply_typography()
+                ov.apply_typography()
             except Exception:
                 log.debug("overlay apply_typography failed", exc_info=True)
 
     def _apply_overlay_opacity(self, v):
+        """Apply opacity globally to every open pop-out quest window."""
         alpha = max(0.4, min(1.0, v / 100.0))
         self._app.config["overlay_opacity"] = round(alpha, 2)
+        try:
+            self._app.save_config()
+        except Exception:
+            pass
         ov = getattr(self._app, "overlay_window", None)
         if ov is not None:
             try:
-                if ov.winfo_exists():
-                    ov.attributes("-alpha", alpha)
-                # Apply to open quest bubbles too
-                for bub in getattr(ov, "_bubbles", {}).values():
-                    try:
-                        if bub.winfo_exists():
-                            bub.attributes("-alpha", alpha)
-                    except Exception:
-                        pass
+                if hasattr(ov, "apply_opacity"):
+                    ov.apply_opacity(alpha)
+                else:
+                    for bub in getattr(ov, "_bubbles", {}).values():
+                        try:
+                            if bub.winfo_exists():
+                                bub.attributes("-alpha", alpha)
+                        except Exception:
+                            pass
             except Exception:
                 pass
 
@@ -576,9 +505,8 @@ class SettingsTab(ctk.CTkFrame):
                 self._log_path_var.set(_found[0] if _found else os.path.join(_dir, "eqlog.txt"))
         self._app.config["log_file_path"] = self._log_path_var.get()
         self._app.config["theme"] = "light" if self._theme_var.get() == "Light" else "default"
-        self._app.config["overlay_enabled"] = bool(self._overlay_var.get())
-        self._app.config["overlay_borderless"] = bool(self._overlay_borderless_var.get())
-        self._app.config["overlay_click_through"] = bool(self._overlay_clickthrough_var.get())
+        # Pop-out overlays are always available from the Journal tab (no dock hub toggle).
+        self._app.config["overlay_enabled"] = True
         self._app.config["overlay_opacity"] = round(self._overlay_opacity_var.get() / 100.0, 2)
         if hasattr(self, "_overlay_font_var"):
             try:
@@ -597,9 +525,8 @@ class SettingsTab(ctk.CTkFrame):
                     float(self._overlay_font_scale_var.get()), 2)
             except Exception:
                 self._app.config["overlay_font_scale"] = 1.0
-        self._app.config["alert_duration_seconds"] = self._duration_var.get()
-        self._app.config["audio_enabled"] = self._audio_var.get()
-        self._app.config["audio_volume"] = self._volume_var.get()
+        # Sound / auto-dismiss alert settings removed — feed is silent + in-window only.
+        self._app.config["audio_enabled"] = False
         self._app.config["export_directory"] = self._export_dir_var.get()
         if self._supa_url_var.get().strip():
             self._app.config["supabase_url"] = self._supa_url_var.get().strip()
@@ -641,10 +568,3 @@ class SettingsTab(ctk.CTkFrame):
         else:
             mb.showinfo("Update Check", "Updater not available.")
 
-    def _fire_test_alert(self):
-        from app.parsers.loot_parser import LootEvent
-        fake = LootEvent(item_name="[DEBUG] Gnoll Test Widget", raw_line="[TEST] --You have looted a [DEBUG] Gnoll Test Widget.--")
-        if hasattr(self._app, "_fire_loot"):
-            threading.Thread(target=self._app._fire_loot, args=(fake,), daemon=True).start()
-        else:
-            mb.showinfo("Not wired", "Test callback not available.")

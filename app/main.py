@@ -377,17 +377,16 @@ def _build_quest_index(app):
 
 
 def _refresh_quest_views(app: AppState):
-    """Refresh the Quest Journal in the main window AND the overlay (if open)."""
+    """Refresh the Quest Journal in the main window AND any open pop-out bubbles."""
     win = app.main_window
     if not win:
         return
     if hasattr(win, "_journal_scroll"):
         win.safe_after(0, win._refresh_journal)
     ov = getattr(app, "overlay_window", None)
-    if ov is not None:
+    if ov is not None and hasattr(ov, "refresh_journal"):
         try:
-            if ov.winfo_exists():
-                win.safe_after(0, ov.refresh_journal)
+            win.safe_after(0, ov.refresh_journal)
         except Exception:
             pass
 
@@ -486,15 +485,14 @@ def _on_turn_in(app: AppState, evt):
 
 
 def _on_zone(app: AppState, zone: str):
-    """Player entered a new zone — update the overlay's 'Quests in Zone' tab."""
+    """Player entered a new zone — re-render open pop-out bubbles if needed."""
     app._current_zone = zone
     _handle_step_completions(app, app.quest_matcher.on_zone(zone))
     ov = getattr(app, "overlay_window", None)
     win = app.main_window
-    if ov is not None and win is not None:
+    if ov is not None and win is not None and hasattr(ov, "update_zone"):
         try:
-            if ov.winfo_exists():
-                win.safe_after(0, lambda: ov.update_zone(zone))
+            win.safe_after(0, lambda: ov.update_zone(zone))
         except Exception:
             log.debug("overlay zone update failed", exc_info=True)
 

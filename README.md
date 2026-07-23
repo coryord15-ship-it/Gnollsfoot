@@ -78,7 +78,7 @@ app/            Application source
   sync/           Community database sync (Supabase)
   ui/             Main window, overlay, and settings
   alerts/         In-app quest-item notifications
-assets/         Icons and sounds
+assets/         Icons (no sound files)
 config/         Default configuration
 installer/      Windows installer scripts
 supabase/       Community database schema/migrations
