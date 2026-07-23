@@ -193,16 +193,25 @@ class SupabaseSync:
         """The logged-in user's quest journal, read directly via the authed client.
         RLS limits user_quests to this user; quests/quest_steps are public-read. The
         client manages its own token refresh, so this stays reliable on long sessions
-        (the old HTTP-with-cached-token path went stale and returned empty)."""
+        (the old HTTP-with-cached-token path went stale and returned empty).
+
+        Each quest includes journal_status: active | pinned | hidden | completed.
+        Order: pinned first, then active, then completed; hidden last (UI can filter).
+        """
         if not self._client:
             return []
         try:
-            uq = self._client.table("user_quests").select("quest_id, status").execute()
-            ids = [r["quest_id"] for r in (uq.data or [])]
+            uq = self._client.table("user_quests").select("quest_id, status, added_at").execute()
+            rows = uq.data or []
+            ids = [r["quest_id"] for r in rows]
             if not ids:
                 return []
+            status_by = {
+                r["quest_id"]: (r.get("status") or "active")
+                for r in rows
+            }
             quests = self._client.table("quests").select(
-                "id, quest_name, zone, reward_items, faction_rewards"
+                "id, quest_name, zone, reward_items, faction_rewards, category, char_class"
             ).in_("id", ids).execute()
             # v1 structured-step columns (QUEST_STEPS_PLAN.md) alongside the original
             # raw-text ones — a step may have only the old fields until migrated/authored.
@@ -222,10 +231,116 @@ class SupabaseSync:
             for q in (quests.data or []):
                 d = dict(q)
                 d["steps"] = by_q.get(q["id"], [])
+                d["journal_status"] = status_by.get(q["id"], "active")
                 out.append(d)
+            rank = {"pinned": 0, "active": 1, "completed": 2, "hidden": 3}
+            out.sort(key=lambda x: (rank.get(x.get("journal_status") or "active", 1),
+                                    (x.get("quest_name") or "").lower()))
             return out
         except Exception as e:
             log.warning("get_journal failed: %s", e)
+            return []
+
+    def _auth_user_id(self):
+        if not self._client:
+            return None
+        try:
+            u = self._client.auth.get_user()
+            return getattr(getattr(u, "user", None), "id", None)
+        except Exception:
+            return None
+
+    def set_quest_status(self, quest_id, status: str) -> bool:
+        """Triage: set user_quests.status to active|pinned|hidden|completed."""
+        if not self._client or quest_id is None:
+            return False
+        status = (status or "").strip().lower()
+        if status not in ("active", "pinned", "hidden", "completed"):
+            return False
+        try:
+            q = self._client.table("user_quests").update({"status": status}).eq(
+                "quest_id", quest_id
+            )
+            uid = self._auth_user_id()
+            if uid:
+                q = q.eq("user_id", uid)
+            q.execute()
+            log.info("Set quest %s status=%s", quest_id, status)
+            return True
+        except Exception as e:
+            log.warning("set_quest_status failed for %s: %s", quest_id, e)
+            return False
+
+    def add_quest(self, quest_id) -> bool:
+        """Add a quest to the journal (status=active). Used by untracked-loot / PoS board."""
+        if not self._client or quest_id is None:
+            return False
+        try:
+            row = {"quest_id": quest_id, "status": "active"}
+            uid = self._auth_user_id()
+            if uid:
+                row["user_id"] = uid
+            self._client.table("user_quests").upsert(row).execute()
+            log.info("Added quest %s to journal", quest_id)
+            return True
+        except Exception as e:
+            log.warning("add_quest failed for %s: %s", quest_id, e)
+            return False
+
+    def find_quests_for_item(self, item_name: str, limit: int = 5) -> list:
+        """Best-effort: find quests that list this item in reward_item or step required_item.
+        Used for untracked-loot suggestions. Returns [{id, quest_name}, ...]."""
+        if not self._client or not item_name:
+            return []
+        try:
+            name = item_name.strip()
+            out = []
+            seen = set()
+
+            def _add(qid, qname):
+                if not qid or qid in seen:
+                    return
+                seen.add(qid)
+                out.append({"id": qid, "quest_name": qname or "Quest"})
+
+            # Prefer step required_item (turn-in loot) over reward name matches.
+            try:
+                steps = self._client.table("quest_steps").select(
+                    "quest_id, required_item, quests(id, quest_name)"
+                ).ilike("required_item", name).limit(limit).execute()
+                for row in (steps.data or []):
+                    q = row.get("quests") or {}
+                    if isinstance(q, list):
+                        q = q[0] if q else {}
+                    _add(row.get("quest_id") or q.get("id"), q.get("quest_name"))
+            except Exception:
+                pass
+
+            if len(out) < limit:
+                res = self._client.table("quests").select(
+                    "id, quest_name, reward_item"
+                ).or_(
+                    f"reward_item.ilike.%{name}%,quest_name.ilike.%{name}%"
+                ).limit(limit).execute()
+                for q in (res.data or []):
+                    _add(q.get("id"), q.get("quest_name"))
+
+            return out[:limit]
+        except Exception as e:
+            log.debug("find_quests_for_item failed: %s", e)
+            return []
+
+    def get_plane_of_sky_quests(self) -> list:
+        """All Plane of Sky class-unlock quests (for the app unlock board)."""
+        if not self._client:
+            return []
+        try:
+            res = self._client.table("quests").select(
+                "id, quest_name, zone, char_class, category, reward_items, reward_item"
+            ).eq("category", "Plane of Sky Class Quests").order("quest_name").execute()
+            return list(res.data or [])
+        except Exception as e:
+            log.warning("get_plane_of_sky_quests failed: %s", e)
             return []
 
     def remove_quest(self, quest_id) -> bool:

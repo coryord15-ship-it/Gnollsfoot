@@ -364,14 +364,56 @@ def _sync_community_data(app: AppState):
         log.warning("Community sync cleanup failed: %s", exc)
 
 
+# Common false-positive loot names for untracked-quest prompts (always silent).
+_NOISY_LOOT_DEFAULTS = frozenset({
+    "bone chips", "cloth cap", "rusty dagger", "rusty short sword", "rusty axe",
+    "snake scales", "bat wing", "spiderling silk", "rat ear", "fire beetle eye",
+    "copper band", "gold", "silver", "platinum", "copper",
+})
+
+
+def _ignored_loot_path() -> str:
+    import os
+    base = os.path.join(os.path.expanduser("~"), "AppData", "Local", "GnollGuard")
+    try:
+        os.makedirs(base, exist_ok=True)
+    except Exception:
+        base = os.path.expanduser("~")
+    return os.path.join(base, "ignored_loot.json")
+
+
+def _load_ignored_loot() -> set:
+    import json
+    try:
+        with open(_ignored_loot_path(), encoding="utf-8") as f:
+            data = json.load(f)
+        return {str(x).lower() for x in (data if isinstance(data, list) else [])}
+    except Exception:
+        return set()
+
+
+def _save_ignored_loot(names: set) -> None:
+    import json
+    try:
+        with open(_ignored_loot_path(), "w", encoding="utf-8") as f:
+            json.dump(sorted(names), f)
+    except Exception:
+        log.debug("save ignored loot failed", exc_info=True)
+
+
 def _build_quest_index(app):
     """Fetch the player's journaled quests and rebuild the required-item lookup
-    so loot can tick quests off. Safe to call on a background thread."""
+    so loot can tick quests off. Safe to call on a background thread.
+    Hidden/completed quests stay in the journal list but do not receive loot ticks."""
     try:
         quests = app.supabase.get_journal()
         app._journal_quests = quests
-        app._quest_item_index = quest_progress.build_index(quests)
-        app.quest_matcher.set_quests(quests)
+        active = [
+            q for q in (quests or [])
+            if (q.get("journal_status") or "active") in ("active", "pinned")
+        ]
+        app._quest_item_index = quest_progress.build_index(active)
+        app.quest_matcher.set_quests(active)
     except Exception:
         log.debug("quest index build failed", exc_info=True)
 
@@ -433,6 +475,27 @@ def _on_loot(app: AppState, loot_evt):
         quest_progress.save_progress(app._quest_progress)
         app.alert_engine.quest_item_obtained(item_name, quest_name, npc_name=npc_name)
         _refresh_quest_views(app)
+    elif not quest_name:
+        # T1.5 — untracked loot: suggest adding a matching quest if we can find one
+        # Skip noisy commons the player has ignored.
+        try:
+            ignored = getattr(app, "_ignored_loot_names", None)
+            if ignored is None:
+                ignored = _load_ignored_loot()
+                app._ignored_loot_names = ignored
+            if item_name.lower() in ignored or item_name.lower() in _NOISY_LOOT_DEFAULTS:
+                pass
+            else:
+                suggestions = app.supabase.find_quests_for_item(item_name, limit=1) or []
+                if suggestions:
+                    s0 = suggestions[0]
+                    app.alert_engine.quest_item_untracked(
+                        item_name,
+                        s0.get("quest_name") or "",
+                        quest_id=str(s0.get("id") or ""),
+                    )  # Add/Ignore wired in MainWindow.add_alert_row
+        except Exception:
+            log.debug("untracked quest lookup failed", exc_info=True)
 
     # Non-quest loot: silent contribution to the DB only — no popup, no sound.
     if item_name.lower() in app._community_cache:

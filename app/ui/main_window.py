@@ -295,8 +295,57 @@ class MainWindow(ctk.CTk):
             anchor="w", wraplength=700, justify="left",
         ).pack(fill="x")
 
+        # Untracked quest loot: one-click Add + Ignore
+        qid = getattr(alert, "quest_id", "") or ""
+        item = getattr(alert, "item_name", "") or ""
+        if getattr(alert, "badge", "") == "Untracked" and (qid or item):
+            actions = ctk.CTkFrame(inner, fg_color="transparent")
+            actions.pack(fill="x", pady=(4, 0))
+            if qid:
+                ctk.CTkButton(
+                    actions, text="Add to journal", width=110, height=24,
+                    font=theme.FONT_BODY_SMALL, fg_color=theme.GOLD,
+                    text_color=theme.BG, hover_color="#e0b010",
+                    command=lambda i=qid, r=row: self._alert_add_quest(i, r),
+                ).pack(side="left", padx=(0, 6))
+            if item:
+                ctk.CTkButton(
+                    actions, text="Ignore item", width=90, height=24,
+                    font=theme.FONT_BODY_SMALL, fg_color=theme.PANEL_HOVER,
+                    text_color=theme.TEXT_SECONDARY,
+                    command=lambda n=item, r=row: self._alert_ignore_item(n, r),
+                ).pack(side="left")
+
         self._alert_rows.append(row)
         self._alerts_scroll._parent_canvas.yview_moveto(1.0)
+
+    def _alert_add_quest(self, quest_id, row=None):
+        def work():
+            ok = self._app.supabase.add_quest(quest_id)
+            if ok:
+                from app.main import _build_quest_index
+                _build_quest_index(self._app)
+                self.safe_after(0, self._refresh_journal)
+        threading.Thread(target=work, daemon=True).start()
+        try:
+            if row is not None:
+                row.destroy()
+        except Exception:
+            pass
+
+    def _alert_ignore_item(self, item_name: str, row=None):
+        from app.main import _load_ignored_loot, _save_ignored_loot
+        names = getattr(self._app, "_ignored_loot_names", None)
+        if names is None:
+            names = _load_ignored_loot()
+            self._app._ignored_loot_names = names
+        names.add(item_name.lower())
+        _save_ignored_loot(names)
+        try:
+            if row is not None:
+                row.destroy()
+        except Exception:
+            pass
 
     def _show_section(self, key):
         if key == self._active_section:
@@ -413,34 +462,146 @@ class MainWindow(ctk.CTk):
 
         # Keep the loot→journal index fresh so required items added/edited on the
         # site start ticking off as soon as the journal is refreshed.
+        # Hidden/completed stay listed but do not receive loot ticks.
         try:
             from app import quest_progress
             self._app._journal_quests = quests or []
-            self._app._quest_item_index = quest_progress.build_index(quests)
-            self._app.quest_matcher.set_quests(quests or [])
+            tracking = [
+                q for q in (quests or [])
+                if (q.get("journal_status") or "active") in ("active", "pinned")
+            ]
+            self._app._quest_item_index = quest_progress.build_index(tracking)
+            self._app.quest_matcher.set_quests(tracking)
         except Exception:
             pass
 
         if not quests:
             self._journal_msg(
                 "No quests in your journal yet.\n"
-                "Browse quests at gnollguard.com/quests and click “Add to Journal.”"
+                "Browse quests at gnollguard.com/quests and click “Add to Journal.”\n"
+                "Plane of Sky unlocks: gnollguard.com/quests/plane-of-sky"
             )
+            self._render_pos_board_button()
             return
 
-        for q in quests:
+        show_hidden = getattr(self, "_journal_show_hidden", False)
+        active = [
+            q for q in quests
+            if (q.get("journal_status") or "active") not in ("hidden",)
+        ]
+        hidden = [q for q in quests if (q.get("journal_status") or "") == "hidden"]
+        visible = quests if show_hidden else active
+
+        # Filter bar: show/hide hidden + Plane of Sky board
+        bar = ctk.CTkFrame(self._journal_scroll, fg_color="transparent")
+        bar.pack(fill="x", padx=theme.PAD, pady=(theme.PAD, 0))
+        self._journal_widgets.append(bar)
+        ctk.CTkButton(
+            bar, text=("Hide hidden" if show_hidden else f"Show hidden ({len(hidden)})"),
+            width=130, height=26, font=theme.FONT_BODY_SMALL,
+            fg_color=theme.PANEL_HOVER, text_color=theme.TEXT_SECONDARY,
+            command=self._toggle_show_hidden,
+        ).pack(side="left", padx=(0, 6))
+        ctk.CTkButton(
+            bar, text="🌥 Plane of Sky",
+            width=120, height=26, font=theme.FONT_BODY_SMALL,
+            fg_color=theme.PANEL_HOVER, text_color=theme.GOLD,
+            command=self._open_pos_board,
+        ).pack(side="left")
+
+        if not visible:
+            self._journal_msg("All journal quests are hidden. Click “Show hidden” above.")
+            return
+
+        for q in visible:
             self._render_journal_quest(q)
+
+    def _toggle_show_hidden(self):
+        self._journal_show_hidden = not getattr(self, "_journal_show_hidden", False)
+        self._refresh_journal()
+
+    def _render_pos_board_button(self):
+        btn = ctk.CTkButton(
+            self._journal_scroll, text="Open Plane of Sky unlock board…",
+            command=self._open_pos_board, font=theme.FONT_BODY,
+            fg_color=theme.PANEL_HOVER, text_color=theme.GOLD,
+        )
+        btn.pack(anchor="w", padx=theme.PAD, pady=6)
+        self._journal_widgets.append(btn)
+
+    def _open_pos_board(self):
+        """Lightweight PoS class-unlock board window (T1.6)."""
+        import webbrowser
+        webbrowser.open("https://www.gnollguard.com/quests/plane-of-sky")
+        # Also show a local checklist if we can load quests
+        def load():
+            rows = self._app.supabase.get_plane_of_sky_quests() or []
+            journal_ids = {
+                q.get("id") for q in (getattr(self._app, "_journal_quests", None) or [])
+            }
+            self.safe_after(0, lambda: self._show_pos_board(rows, journal_ids))
+        threading.Thread(target=load, daemon=True).start()
+
+    def _show_pos_board(self, rows, journal_ids):
+        win = ctk.CTkToplevel(self)
+        win.title("Plane of Sky Class Unlocks")
+        win.geometry("480x560")
+        win.attributes("-topmost", True)
+        scroll = ctk.CTkScrollableFrame(win, fg_color=theme.BG)
+        scroll.pack(fill="both", expand=True, padx=8, pady=8)
+        ctk.CTkLabel(
+            scroll, text="Plane of Sky — class primary unlocks",
+            font=theme.FONT_SUBHEADER, text_color=theme.GOLD,
+        ).pack(anchor="w", pady=(0, 6))
+        ctk.CTkLabel(
+            scroll,
+            text="Add tests to your journal on the site or here. "
+                 "✓ = already in journal. Full board: gnollguard.com/quests/plane-of-sky",
+            font=theme.FONT_BODY_SMALL, text_color=theme.TEXT_SECONDARY,
+            wraplength=440, justify="left",
+        ).pack(anchor="w", pady=(0, 8))
+        by_class = {}
+        for r in rows:
+            c = r.get("char_class") or "Other"
+            by_class.setdefault(c, []).append(r)
+        for cls in sorted(by_class.keys()):
+            ctk.CTkLabel(
+                scroll, text=cls, font=theme.FONT_BODY, text_color=theme.GOLD,
+            ).pack(anchor="w", pady=(8, 2))
+            for r in by_class[cls]:
+                qid = r.get("id")
+                name = r.get("quest_name") or "Quest"
+                mark = "✓ " if qid in journal_ids else "○ "
+                row = ctk.CTkFrame(scroll, fg_color=theme.PANEL, corner_radius=6)
+                row.pack(fill="x", pady=2)
+                ctk.CTkLabel(
+                    row, text=mark + name, font=theme.FONT_BODY_SMALL,
+                    text_color=theme.TEXT_PRIMARY, anchor="w",
+                ).pack(side="left", padx=8, pady=4, fill="x", expand=True)
+                if qid not in journal_ids:
+                    ctk.CTkButton(
+                        row, text="Add", width=50, height=24,
+                        font=theme.FONT_BODY_SMALL,
+                        command=lambda i=qid, w=win: self._add_quest_from_board(i, w),
+                    ).pack(side="right", padx=6, pady=4)
+
+    def _add_quest_from_board(self, quest_id, win=None):
+        def work():
+            self._app.supabase.add_quest(quest_id)
+            self.safe_after(0, self._refresh_journal)
+        threading.Thread(target=work, daemon=True).start()
 
     # journal_view's default theme is already this app's dark-gold palette, so no
     # override dict is needed here — the Officer Console passes its own steel-cyan one.
     def _journal_quest_header(self, card, title_row, q):
-        """Trash + Pop out / Dock controls on each journal quest card."""
+        """Trash + Pop out/Dock + pin/hide/done triage on each journal quest card."""
+        status = (q.get("journal_status") or "active").lower()
         ctk.CTkButton(
-            title_row, text="🗑", width=30, height=26,
+            title_row, text="🗑", width=28, height=24,
             fg_color="transparent", text_color=theme.TEXT_MUTED,
-            hover_color=theme.DANGER, font=theme.FONT_BODY,
+            hover_color=theme.DANGER, font=theme.FONT_BODY_SMALL,
             command=lambda qq=q: self._delete_quest(qq),
-        ).pack(side="right")
+        ).pack(side="right", padx=1)
         qid = q.get("id")
         mgr = self._ensure_overlay_manager()
         popped = bool(mgr and mgr.is_popped(qid))
@@ -460,6 +621,60 @@ class MainWindow(ctk.CTk):
                 corner_radius=8,
                 command=lambda qq=q: self._pop_out_quest(qq),
             ).pack(side="right", padx=(0, 4))
+        ctk.CTkButton(
+            title_row, text="✓", width=28, height=24,
+            fg_color="transparent",
+            text_color=theme.GREEN if status == "completed" else theme.TEXT_MUTED,
+            hover_color=theme.PANEL_HOVER, font=theme.FONT_BODY_SMALL,
+            command=lambda qq=q: self._set_quest_status(qq, "completed"),
+        ).pack(side="right", padx=1)
+        ctk.CTkButton(
+            title_row, text="Hide", width=40, height=24,
+            fg_color="transparent",
+            text_color=theme.TEXT_MUTED,
+            hover_color=theme.PANEL_HOVER, font=theme.FONT_BODY_SMALL,
+            command=lambda qq=q: self._set_quest_status(qq, "hidden"),
+        ).pack(side="right", padx=1)
+        ctk.CTkButton(
+            title_row, text="📌", width=28, height=24,
+            fg_color="transparent",
+            text_color=theme.GOLD if status == "pinned" else theme.TEXT_MUTED,
+            hover_color=theme.PANEL_HOVER, font=theme.FONT_BODY_SMALL,
+            command=lambda qq=q: self._set_quest_status(
+                qq, "active" if status == "pinned" else "pinned"
+            ),
+        ).pack(side="right", padx=1)
+        if status in ("pinned", "completed", "hidden"):
+            ctk.CTkLabel(
+                title_row, text=status.upper(), font=theme.FONT_BODY_SMALL,
+                text_color=theme.TEXT_SECONDARY,
+            ).pack(side="right", padx=4)
+
+    def _set_quest_status(self, q, status: str):
+        qid = q.get("id")
+        if not qid:
+            return
+        q["journal_status"] = status
+        # Keep local list in sync for matchers (hidden still in list but filtered in UI)
+        for jq in getattr(self._app, "_journal_quests", []) or []:
+            if jq.get("id") == qid:
+                jq["journal_status"] = status
+        # Active tracking index: exclude hidden/completed from loot ticks
+        try:
+            from app import quest_progress
+            active = [
+                jq for jq in (self._app._journal_quests or [])
+                if (jq.get("journal_status") or "active") in ("active", "pinned")
+            ]
+            self._app._quest_item_index = quest_progress.build_index(active)
+            self._app.quest_matcher.set_quests(active)
+        except Exception:
+            pass
+        threading.Thread(
+            target=lambda: self._app.supabase.set_quest_status(qid, status),
+            daemon=True,
+        ).start()
+        self._refresh_journal()
 
     def _pop_out_quest(self, q):
         """Open this journal quest as a standalone always-on-top overlay (max 5)."""

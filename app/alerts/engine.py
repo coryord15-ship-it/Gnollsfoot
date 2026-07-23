@@ -22,6 +22,8 @@ class Alert:
     alert_type: str = "quest"      # 'quest'
     item_name: str = ""
     npc_name: str = ""             # mob that dropped the item, from log parser
+    quest_id: str = ""             # optional — for one-click Add to journal
+    quest_name: str = ""
 
 
 class AlertEngine:
@@ -67,6 +69,34 @@ class AlertEngine:
             alert_type="quest",
             item_name=item_name,
             npc_name=npc_name,
+        ))
+
+    def quest_item_untracked(
+        self,
+        item_name: str,
+        quest_name: str = "",
+        quest_id: str = "",
+    ):
+        """Looted something that may belong to a quest not currently in the journal."""
+        if quest_name:
+            body = (
+                f"You looted {item_name}. Possible quest: “{quest_name}”. "
+                f"Click Add to track it, or Ignore to silence this item."
+            )
+        else:
+            body = (
+                f"You looted {item_name}, which looks quest-related but isn’t in your "
+                f"active journal. Search gnollguard.com/quests to track it."
+            )
+        self._emit(Alert(
+            title=f"Not in journal: {item_name}",
+            body=body,
+            color=theme.ALERT_QUEST_UNVERIFIED,
+            badge="Untracked",
+            alert_type="quest",
+            item_name=item_name,
+            quest_id=quest_id or "",
+            quest_name=quest_name or "",
         ))
 
     def quest_step_complete(self, instruction: str, quest_name: str, step_order=None):
