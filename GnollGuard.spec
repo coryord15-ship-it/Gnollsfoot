@@ -48,6 +48,8 @@ a = Analysis(
         'app.ui.main_window',
         'app.ui.settings',
         'app.ui.theme',
+        'app.ui.journal_overlay',
+        'app.ui.journal_view',
         'app.updater',
         'app.version',
     ],

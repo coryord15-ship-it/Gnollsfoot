@@ -151,6 +151,8 @@ class MainWindow(ctk.CTk):
         }
         self._build_alerts_tab(self._sections["Recent Alerts"])
         self._build_questlog_tab(self._sections["Quest Journal"])
+        # SettingsTab is built lazily on first show — CTkScrollableFrame created while
+        # the section is pack_forget()'d often stays permanently empty.
         self._settings_tab = SettingsTab(self._sections["Settings"], self._app)
         self._settings_tab.pack(fill="both", expand=True)
 
@@ -291,6 +293,20 @@ class MainWindow(ctk.CTk):
                 btn.configure(fg_color="transparent", text_color=theme.TEXT_SECONDARY)
         if key == "Quest Journal":
             self._refresh_active_journal()
+        elif key == "Settings":
+            # Must rebuild/layout only after the section is mapped, or Settings appears blank.
+            # Double-call: immediate (fast) + after idle (real geometry available).
+            def _show_settings():
+                try:
+                    self.update_idletasks()
+                    self._settings_tab.ensure_visible()
+                except Exception:
+                    log.exception("Settings section failed to show")
+            try:
+                _show_settings()
+                self.after(50, _show_settings)
+            except Exception:
+                log.exception("Settings section failed to schedule")
 
     def _clear_alerts(self):
         for row in self._alert_rows:

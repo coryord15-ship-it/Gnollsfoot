@@ -114,20 +114,31 @@ def _setup_logging():
 
 
 def _load_config() -> dict:
+    """Load %APPDATA%\\GnollGuard\\settings.json.
+
+    utf-8-sig strips a leading BOM if present (Notepad / some editors write one).
+    Without that, json.load fails and the whole config is dropped — Settings and
+    overlay options appear broken until the file is rewritten cleanly.
+    """
     try:
-        with open(_CONFIG_PATH, encoding="utf-8") as f:
-            return json.load(f)
+        with open(_CONFIG_PATH, encoding="utf-8-sig") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
     except FileNotFoundError:
         log.warning("settings.json not found — using defaults")
         return {}
     except json.JSONDecodeError as e:
         log.error("settings.json is malformed: %s", e)
         return {}
+    except OSError as e:
+        log.error("settings.json unreadable: %s", e)
+        return {}
 
 
 def _save_config(config: dict):
     try:
-        with open(_CONFIG_PATH, "w", encoding="utf-8") as f:
+        # Always write plain UTF-8 (no BOM) so reloads stay clean.
+        with open(_CONFIG_PATH, "w", encoding="utf-8", newline="\n") as f:
             json.dump(config, f, indent=2)
     except Exception as e:
         log.error("Failed to save config: %s", e)
@@ -184,7 +195,7 @@ def _migrate_config(config: dict) -> dict:
     bundled_path = _bundled_config_path()
 
     try:
-        with open(bundled_path, encoding="utf-8") as f:
+        with open(bundled_path, encoding="utf-8-sig") as f:
             bundled = json.load(f)
     except Exception:
         return config
@@ -795,6 +806,16 @@ def main():
     win = MainWindow(app)
     win.withdraw()
     app.main_window = win
+    # Boot splash is a plain tk.Tk() created FIRST, so it became tkinter's default root.
+    # CTkFont / CTkScrollableFrame need a default root; if we leave splash as default and
+    # then destroy it, _default_root becomes None and Settings (built lazily after splash
+    # is gone) crashes with: RuntimeError: Too early to use font: no default root window.
+    # Point the default root at the real app window immediately.
+    try:
+        import tkinter as _tk
+        _tk._default_root = win
+    except Exception:
+        pass
 
     # Verify callback: marks item correct locally and pushes to community DB.
     def on_verify_item(item_name: str):
@@ -939,7 +960,16 @@ def main():
         app.supabase.set_auth_token(app.auth.access_token)
         threading.Thread(target=lambda: _build_quest_index(app), daemon=True, name="QuestIndex").start()
         win.safe_after(0, win._refresh_auth_header)
-        win.safe_after(0, lambda: win._settings_tab._build())
+        # Force a full rebuild of Settings (login/logout changes Account section).
+        # ensure_visible() only rebuilds when mapped; mark dirty so next open rebuilds too.
+        def _refresh_settings():
+            try:
+                win._settings_tab._built_while_mapped = False
+                if getattr(win, "_active_section", None) == "Settings":
+                    win._settings_tab.ensure_visible()
+            except Exception:
+                log.exception("settings refresh after auth change failed")
+        win.safe_after(0, _refresh_settings)
     app.auth.set_auth_change_callback(_on_auth_change)
     app.auth.restore_session()
     app.supabase.set_auth_token(app.auth.access_token)  # apply restored session token
@@ -973,6 +1003,12 @@ def main():
     # Everything is wired — swap the boot splash for the real window.
     try:
         splash.destroy()
+    except Exception:
+        pass
+    # Re-assert default root after splash teardown (destroy clears it if splash was root).
+    try:
+        import tkinter as _tk
+        _tk._default_root = win
     except Exception:
         pass
     win.deiconify()

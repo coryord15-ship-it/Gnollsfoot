@@ -34,16 +34,53 @@ class SettingsTab(ctk.CTkFrame):
         ).pack(expand=True, pady=theme.PAD * 2)
 
     def ensure_visible(self):
-        """Call when the Settings section is packed/mapped so controls actually render."""
-        if self._built_while_mapped and self.winfo_children():
+        """Call when the Settings section is packed/mapped so controls actually render.
+
+        CTkScrollableFrame created while the parent is pack_forget()'d (0×0) often
+        stays permanently empty — so we only build after the section is shown.
+        """
+        kids = list(self.winfo_children())
+        only_placeholder = False
+        if len(kids) == 1:
+            try:
+                only_placeholder = (kids[0].cget("text") or "").startswith("Loading settings")
+            except Exception:
+                only_placeholder = False
+        if self._built_while_mapped and kids and not only_placeholder:
             # Already built while visible; still force a layout pass for CTkScrollableFrame.
             try:
                 self.update_idletasks()
+                # Nudge internal canvas (CustomTkinter sometimes leaves 0 height until this)
+                self.after(30, self._nudge_scroll_layout)
             except Exception:
                 pass
             return
         self._build()
         self._built_while_mapped = True
+        try:
+            self.update_idletasks()
+            self.after(30, self._nudge_scroll_layout)
+        except Exception:
+            pass
+
+    def _nudge_scroll_layout(self):
+        """Force CTkScrollableFrame to recompute after the parent has a real size."""
+        try:
+            for w in self.winfo_children():
+                try:
+                    w.update_idletasks()
+                except Exception:
+                    pass
+                # CTkScrollableFrame keeps content on _parent_frame / _parent_canvas
+                canvas = getattr(w, "_parent_canvas", None)
+                if canvas is not None:
+                    try:
+                        canvas.configure(scrollregion=canvas.bbox("all"))
+                        canvas.yview_moveto(0)
+                    except Exception:
+                        pass
+        except Exception:
+            pass
 
     def _build(self):
         # Clear any previous render so repeated builds (e.g. after sign-out) don't
@@ -73,7 +110,24 @@ class SettingsTab(ctk.CTkFrame):
                 command=self._build,
             ).pack(anchor="w", padx=theme.PAD, pady=theme.PAD_SM)
 
+    def _ensure_tk_default_root(self):
+        """CTkScrollableFrame creates CTkFont() which requires tkinter's default root.
+
+        After the boot splash (a temporary Tk) is destroyed, _default_root can be None
+        even though MainWindow is alive — that yields:
+            RuntimeError: Too early to use font: no default root window
+        """
+        try:
+            import tkinter as tk
+            if tk._default_root is None:
+                top = self.winfo_toplevel()
+                if top is not None:
+                    tk._default_root = top
+        except Exception:
+            pass
+
     def _build_body(self):
+        self._ensure_tk_default_root()
         scroll = ctk.CTkScrollableFrame(self, fg_color=theme.BG)
         scroll.pack(fill="both", expand=True, padx=theme.PAD, pady=theme.PAD)
 
@@ -179,54 +233,13 @@ class SettingsTab(ctk.CTkFrame):
                                self._apply_overlay_opacity(int(v))),
         ).pack(side="right", padx=theme.PAD, fill="x", expand=True)
 
-        # ── Overlay typography ───────────────────────────────────────────────
-        ctk.CTkLabel(
-            scroll, text="Overlay font (hub + quest bubbles). Helvetica uses Arial on Windows if needed.",
-            font=theme.FONT_BODY_SMALL, text_color=theme.TEXT_MUTED, anchor="w",
-        ).pack(anchor="w", pady=(theme.PAD_SM, 2))
-        font_row = ctk.CTkFrame(scroll, fg_color="transparent")
-        font_row.pack(fill="x", pady=(0, theme.PAD_SM))
-        ctk.CTkLabel(
-            font_row, text="Font family", font=theme.FONT_BODY,
-            text_color=theme.TEXT_PRIMARY, anchor="w",
-        ).pack(side="left")
-        _fam = self._app.config.get("overlay_font_family") or "Segoe UI"
-        if _fam.lower() in ("arial", "helvetica neue"):
-            _fam = "Helvetica"
-        self._overlay_font_var = ctk.StringVar(value=_fam if _fam in theme.FONT_FAMILIES else "Segoe UI")
-        ctk.CTkOptionMenu(
-            font_row, values=list(theme.FONT_FAMILIES), variable=self._overlay_font_var,
-            fg_color=theme.PANEL, button_color=theme.PANEL,
-            button_hover_color=theme.PANEL_HOVER, text_color=theme.TEXT_PRIMARY,
-            font=theme.FONT_BODY, width=160,
-            command=lambda _v: self._apply_overlay_typography(),
-        ).pack(side="right")
-
-        scale_row = ctk.CTkFrame(scroll, fg_color="transparent")
-        scale_row.pack(fill="x", pady=(0, theme.PAD))
+        # ── Overlay typography (defensive — never block the rest of Settings) ─
         try:
-            _sc = float(self._app.config.get("overlay_font_scale", 1.0))
+            self._build_overlay_typography(scroll)
         except Exception:
-            _sc = 1.0
-        self._overlay_font_scale_var = ctk.DoubleVar(value=max(0.8, min(1.6, _sc)))
-        scale_val = ctk.CTkLabel(
-            scale_row, text=f"{self._overlay_font_scale_var.get():.0%}", width=44,
-            font=theme.FONT_BODY, text_color=theme.TEXT_SECONDARY,
-        )
-        ctk.CTkLabel(
-            scale_row, text="Font size", font=theme.FONT_BODY,
-            text_color=theme.TEXT_PRIMARY, anchor="w",
-        ).pack(side="left")
-        scale_val.pack(side="right")
-        ctk.CTkSlider(
-            scale_row, variable=self._overlay_font_scale_var, from_=0.8, to=1.6,
-            number_of_steps=16,
-            button_color=theme.GOLD, progress_color=theme.GOLD, fg_color=theme.PANEL,
-            command=lambda v: (
-                scale_val.configure(text=f"{float(v):.0%}"),
-                self._apply_overlay_typography(),
-            ),
-        ).pack(side="right", padx=theme.PAD, fill="x", expand=True)
+            log.exception("overlay typography controls failed to build")
+            self._overlay_font_var = ctk.StringVar(value="Segoe UI")
+            self._overlay_font_scale_pct_var = ctk.IntVar(value=100)
 
         self._section(scroll, "Alerts")
         self._duration_var = ctk.IntVar(value=self._app.config.get("alert_duration_seconds", 10))
@@ -343,6 +356,75 @@ class SettingsTab(ctk.CTkFrame):
 
     # ── Helpers ──────────────────────────────────────────────────────────────
 
+    def _build_overlay_typography(self, scroll):
+        """Font family + size for Quest Dock / bubbles. Isolated so failures don't blank Settings."""
+        families = list(getattr(theme, "FONT_FAMILIES", None) or (
+            "Segoe UI", "Helvetica", "Georgia", "Consolas"))
+        ctk.CTkLabel(
+            scroll,
+            text="Overlay font (hub + quest bubbles). Helvetica uses Arial on Windows if needed.",
+            font=theme.FONT_BODY_SMALL, text_color=theme.TEXT_MUTED, anchor="w",
+        ).pack(anchor="w", pady=(theme.PAD_SM, 2))
+
+        font_row = ctk.CTkFrame(scroll, fg_color="transparent")
+        font_row.pack(fill="x", pady=(0, theme.PAD_SM))
+        ctk.CTkLabel(
+            font_row, text="Font family", font=theme.FONT_BODY,
+            text_color=theme.TEXT_PRIMARY, anchor="w",
+        ).pack(side="left")
+        _fam = str(self._app.config.get("overlay_font_family") or "Segoe UI").strip()
+        if _fam.lower() in ("arial", "helvetica neue"):
+            _fam = "Helvetica"
+        if _fam not in families:
+            _fam = "Segoe UI"
+        self._overlay_font_var = ctk.StringVar(value=_fam)
+        ctk.CTkOptionMenu(
+            font_row, values=families, variable=self._overlay_font_var,
+            fg_color=theme.PANEL, button_color=theme.PANEL,
+            button_hover_color=theme.PANEL_HOVER, text_color=theme.TEXT_PRIMARY,
+            font=theme.FONT_BODY, width=160,
+            command=self._on_font_family_change,
+        ).pack(side="right")
+
+        # Use integer percent (80–160) — more reliable than DoubleVar on some CTk builds
+        try:
+            _sc = float(self._app.config.get("overlay_font_scale", 1.0))
+        except Exception:
+            _sc = 1.0
+        pct = int(round(max(0.8, min(1.6, _sc)) * 100))
+        self._overlay_font_scale_pct_var = ctk.IntVar(value=pct)
+        scale_row = ctk.CTkFrame(scroll, fg_color="transparent")
+        scale_row.pack(fill="x", pady=(0, theme.PAD))
+        scale_val = ctk.CTkLabel(
+            scale_row, text=f"{pct}%", width=44,
+            font=theme.FONT_BODY, text_color=theme.TEXT_SECONDARY,
+        )
+        ctk.CTkLabel(
+            scale_row, text="Font size", font=theme.FONT_BODY,
+            text_color=theme.TEXT_PRIMARY, anchor="w",
+        ).pack(side="left")
+        scale_val.pack(side="right")
+        ctk.CTkSlider(
+            scale_row, variable=self._overlay_font_scale_pct_var, from_=80, to=160,
+            button_color=theme.GOLD, progress_color=theme.GOLD, fg_color=theme.PANEL,
+            command=lambda v, lbl=scale_val: self._on_font_scale_change(v, lbl),
+        ).pack(side="right", padx=theme.PAD, fill="x", expand=True)
+
+    def _on_font_family_change(self, _value=None):
+        try:
+            self._apply_overlay_typography()
+        except Exception:
+            log.exception("font family change failed")
+
+    def _on_font_scale_change(self, value, label=None):
+        try:
+            pct = int(float(value))
+            if label is not None:
+                label.configure(text=f"{pct}%")
+            self._apply_overlay_typography()
+        except Exception:
+            log.exception("font scale change failed")
+
     def _section(self, parent, title: str):
         ctk.CTkLabel(
             parent, text=title,
@@ -387,24 +469,36 @@ class SettingsTab(ctk.CTkFrame):
 
     def _apply_overlay_typography(self):
         """Live-update overlay hub + bubbles when font family/scale changes."""
-        fam = self._overlay_font_var.get()
-        try:
-            scale = float(self._overlay_font_scale_var.get())
-        except Exception:
-            scale = 1.0
+        fam = "Segoe UI"
+        if hasattr(self, "_overlay_font_var"):
+            try:
+                fam = self._overlay_font_var.get() or "Segoe UI"
+            except Exception:
+                pass
+        scale = 1.0
+        if hasattr(self, "_overlay_font_scale_pct_var"):
+            try:
+                scale = max(0.8, min(1.6, int(self._overlay_font_scale_pct_var.get()) / 100.0))
+            except Exception:
+                scale = 1.0
+        elif hasattr(self, "_overlay_font_scale_var"):
+            try:
+                scale = max(0.8, min(1.6, float(self._overlay_font_scale_var.get())))
+            except Exception:
+                scale = 1.0
         self._app.config["overlay_font_family"] = fam
         self._app.config["overlay_font_scale"] = round(scale, 2)
         try:
             self._app.save_config()
         except Exception:
-            pass
+            log.debug("save_config during typography failed", exc_info=True)
         ov = getattr(self._app, "overlay_window", None)
         if ov is not None:
             try:
                 if ov.winfo_exists() and hasattr(ov, "apply_typography"):
                     ov.apply_typography()
             except Exception:
-                pass
+                log.debug("overlay apply_typography failed", exc_info=True)
 
     def _apply_overlay_opacity(self, v):
         alpha = max(0.4, min(1.0, v / 100.0))
@@ -487,8 +581,17 @@ class SettingsTab(ctk.CTkFrame):
         self._app.config["overlay_click_through"] = bool(self._overlay_clickthrough_var.get())
         self._app.config["overlay_opacity"] = round(self._overlay_opacity_var.get() / 100.0, 2)
         if hasattr(self, "_overlay_font_var"):
-            self._app.config["overlay_font_family"] = self._overlay_font_var.get()
-        if hasattr(self, "_overlay_font_scale_var"):
+            try:
+                self._app.config["overlay_font_family"] = self._overlay_font_var.get()
+            except Exception:
+                pass
+        if hasattr(self, "_overlay_font_scale_pct_var"):
+            try:
+                self._app.config["overlay_font_scale"] = round(
+                    max(0.8, min(1.6, int(self._overlay_font_scale_pct_var.get()) / 100.0)), 2)
+            except Exception:
+                self._app.config["overlay_font_scale"] = 1.0
+        elif hasattr(self, "_overlay_font_scale_var"):
             try:
                 self._app.config["overlay_font_scale"] = round(
                     float(self._overlay_font_scale_var.get()), 2)
