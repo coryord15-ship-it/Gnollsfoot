@@ -478,6 +478,7 @@ class MainWindow(ctk.CTk):
         if not quests:
             self._journal_msg(
                 "No quests in your journal yet.\n"
+                "New character? gnollguard.com/quests/starter\n"
                 "Browse quests at gnollguard.com/quests and click “Add to Journal.”\n"
                 "Plane of Sky unlocks: gnollguard.com/quests/plane-of-sky"
             )
@@ -598,19 +599,21 @@ class MainWindow(ctk.CTk):
         """Lightweight PoS class-unlock board window (T1.6)."""
         import webbrowser
         webbrowser.open("https://www.gnollguard.com/quests/plane-of-sky")
-        # Also show a local checklist if we can load quests
         def load():
             rows = self._app.supabase.get_plane_of_sky_quests() or []
-            journal_ids = {
-                q.get("id") for q in (getattr(self._app, "_journal_quests", None) or [])
-            }
-            self.safe_after(0, lambda: self._show_pos_board(rows, journal_ids))
+            status_by = {}
+            for q in (getattr(self._app, "_journal_quests", None) or []):
+                if q.get("id") is not None:
+                    status_by[q.get("id")] = (q.get("journal_status") or "active")
+            self.safe_after(0, lambda: self._show_pos_board(rows, status_by))
         threading.Thread(target=load, daemon=True).start()
 
-    def _show_pos_board(self, rows, journal_ids):
+    def _show_pos_board(self, rows, status_by):
+        """PoS board: ✓ done · ▶ in progress · ○ add."""
+        status_by = status_by or {}
         win = ctk.CTkToplevel(self)
         win.title("Plane of Sky Class Unlocks")
-        win.geometry("480x560")
+        win.geometry("500x580")
         win.attributes("-topmost", True)
         scroll = ctk.CTkScrollableFrame(win, fg_color=theme.BG)
         scroll.pack(fill="both", expand=True, padx=8, pady=8)
@@ -620,10 +623,11 @@ class MainWindow(ctk.CTk):
         ).pack(anchor="w", pady=(0, 6))
         ctk.CTkLabel(
             scroll,
-            text="Add tests to your journal on the site or here. "
-                 "✓ = already in journal. Full board: gnollguard.com/quests/plane-of-sky",
+            text="✓ Done · ▶ In progress · ○ Not tracking. "
+                 "Don't destroy completed PoS items until unlock sticks. "
+                 "Full board: gnollguard.com/quests/plane-of-sky",
             font=theme.FONT_BODY_SMALL, text_color=theme.TEXT_SECONDARY,
-            wraplength=440, justify="left",
+            wraplength=460, justify="left",
         ).pack(anchor="w", pady=(0, 8))
         by_class = {}
         for r in rows:
@@ -636,18 +640,32 @@ class MainWindow(ctk.CTk):
             for r in by_class[cls]:
                 qid = r.get("id")
                 name = r.get("quest_name") or "Quest"
-                mark = "✓ " if qid in journal_ids else "○ "
+                st = (status_by.get(qid) or "").lower()
+                if st == "completed":
+                    mark, color = "✓ ", theme.GREEN
+                elif st in ("active", "pinned"):
+                    mark, color = "▶ ", theme.GOLD
+                else:
+                    mark, color = "○ ", theme.TEXT_PRIMARY
                 row = ctk.CTkFrame(scroll, fg_color=theme.PANEL, corner_radius=6)
                 row.pack(fill="x", pady=2)
                 ctk.CTkLabel(
                     row, text=mark + name, font=theme.FONT_BODY_SMALL,
-                    text_color=theme.TEXT_PRIMARY, anchor="w",
+                    text_color=color, anchor="w",
                 ).pack(side="left", padx=8, pady=4, fill="x", expand=True)
-                if qid not in journal_ids:
+                if not st:
                     ctk.CTkButton(
                         row, text="Add", width=50, height=24,
                         font=theme.FONT_BODY_SMALL,
                         command=lambda i=qid, w=win: self._add_quest_from_board(i, w),
+                    ).pack(side="right", padx=6, pady=4)
+                elif st == "completed":
+                    ctk.CTkLabel(
+                        row, text="Done", font=theme.FONT_BODY_SMALL, text_color=theme.GREEN,
+                    ).pack(side="right", padx=6, pady=4)
+                else:
+                    ctk.CTkLabel(
+                        row, text="Tracking", font=theme.FONT_BODY_SMALL, text_color=theme.GOLD,
                     ).pack(side="right", padx=6, pady=4)
 
     def _add_quest_from_board(self, quest_id, win=None):
