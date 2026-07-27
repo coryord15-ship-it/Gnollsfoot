@@ -380,6 +380,14 @@ class QuestBubble(ctk.CTkToplevel):
             hover_color=theme.GOLD, text_color=theme.TEXT_PRIMARY, font=self._f_sm,
             corner_radius=10, command=self._dock,
         ).pack(side="right", padx=(0, 4))
+        # v2: focus toggle — ☰ full step list  /  ◧ next step only (EQ2 Quest Helper style)
+        self._focus_btn = ctk.CTkButton(
+            hdr, text="◧" if getattr(self, "_focus_mode", False) else "☰",
+            width=28, height=24, fg_color=theme.PANEL, hover_color=theme.GOLD,
+            text_color=theme.TEXT_PRIMARY, font=self._f_sm, corner_radius=10,
+            command=self._toggle_focus,
+        )
+        self._focus_btn.pack(side="right", padx=(0, 4))
         ctk.CTkButton(
             hdr, text="✕", width=26, height=24, fg_color="transparent",
             text_color=theme.TEXT_MUTED, hover_color=theme.DANGER, font=self._f_sm,
@@ -396,6 +404,96 @@ class QuestBubble(ctk.CTkToplevel):
         grip.pack(side="right", padx=8)
         grip.bind("<Button-1>", self._resize_start)
         grip.bind("<B1-Motion>", self._resize_move)
+
+    # ── FOCUS MODE (v2) ──────────────────────────────────────────────────────
+    # Borrowed from EQ2's "Quest Helper" and Questie's next-objective framing:
+    # while you are actually playing you do not want a wall of steps, you want
+    # ONE line telling you what to do next. Toggle with the ◧ button in the header.
+    def _next_step(self, q):
+        """First not-yet-done step, or None if the quest is finished."""
+        matcher = getattr(self._app, "quest_matcher", None)
+        steps = sorted(q.get("steps") or [], key=lambda x: x.get("step_order", 0))
+        for s in steps:
+            num = s.get("step_order", "")
+            done = bool(matcher and s.get("action_type")
+                        and matcher.is_step_done(q.get("id"), num))
+            if not done:
+                return s
+        return None
+
+    def _render_focus(self, q, wrap):
+        """One big 'do this next' line + its items + a /waypoint button."""
+        step = self._next_step(q)
+        if step is None:
+            ctk.CTkLabel(
+                self._body, text="✓  All steps complete",
+                font=self._f_body, text_color=theme.GREEN, anchor="w",
+            ).pack(anchor="w", pady=(6, 2))
+            if q.get("reward_items"):
+                ctk.CTkLabel(
+                    self._body, text="Reward: " + ", ".join(q["reward_items"]),
+                    font=self._f_sm, text_color=theme.GOLD, anchor="w",
+                    wraplength=wrap, justify="left",
+                ).pack(anchor="w", pady=(4, 0))
+            return
+
+        steps = q.get("steps") or []
+        num = step.get("step_order", "")
+        ctk.CTkLabel(
+            self._body, text=f"NEXT  ·  step {num} of {len(steps)}",
+            font=self._f_sm, text_color=theme.TEXT_SECONDARY, anchor="w",
+        ).pack(anchor="w", pady=(2, 2))
+        ctk.CTkLabel(
+            self._body, text=step.get("instruction") or "(no instruction recorded)",
+            font=self._f_body, text_color=theme.TEXT_PRIMARY, anchor="w",
+            justify="left", wraplength=wrap,
+        ).pack(anchor="w", pady=(0, 4))
+
+        prog = getattr(self._app, "_quest_progress", set())
+        given = getattr(self._app, "_quest_given", set())
+        for it in (step.get("required_items") or []):
+            low = it.lower()
+            if low in given:
+                mark, col = "✔", theme.GREEN
+            elif low in prog:
+                mark, col = "✓", theme.GOLD
+            else:
+                mark, col = "○", theme.TEXT_SECONDARY
+            ctk.CTkLabel(self._body, text=f"   {mark} {it}", font=self._f_sm,
+                         text_color=col, anchor="w").pack(anchor="w")
+
+        # Waypoint: the logic already exists (quest_matcher.waypoint_command) and is
+        # wired into journal_view + the site, but was MISSING from the overlay — the
+        # one surface you actually look at mid-play.
+        entity = step.get("entities")
+        wp = None
+        try:
+            if entity:
+                from app import quest_matcher as _qm
+                wp = _qm.waypoint_command(entity)
+        except Exception:
+            wp = None
+        if wp:
+            ctk.CTkButton(
+                self._body, text="📍 Copy /waypoint", width=150, height=24,
+                font=self._f_sm, fg_color=theme.PANEL, text_color=theme.TEXT_SECONDARY,
+                command=lambda cmd=wp: self._copy_text(cmd),
+            ).pack(anchor="w", pady=(6, 0))
+
+    def _copy_text(self, text):
+        try:
+            self.clipboard_clear()
+            self.clipboard_append(text)
+        except Exception:
+            pass
+
+    def _toggle_focus(self):
+        self._focus_mode = not getattr(self, "_focus_mode", False)
+        try:
+            self._focus_btn.configure(text="◧" if self._focus_mode else "☰")
+        except Exception:
+            pass
+        self.render()
 
     def render(self):
         for w in self._body.winfo_children():
@@ -423,9 +521,14 @@ class QuestBubble(ctk.CTkToplevel):
                 ).pack(anchor="w", pady=(0, 6))
             except Exception:
                 pass
+        wrap = max(180, self.winfo_width() - 48)
+        # v2: focus mode short-circuits the full step list.
+        if getattr(self, "_focus_mode", False):
+            self._render_focus(q, wrap)
+            return
+
         prog = getattr(self._app, "_quest_progress", set())
         given = getattr(self._app, "_quest_given", set())
-        wrap = max(180, self.winfo_width() - 48)
         for s in sorted(q.get("steps") or [], key=lambda x: x.get("step_order", 0)):
             num = s.get("step_order", "")
             is_done = bool(

@@ -275,7 +275,7 @@ class AppState:
         # Sync
         self.supabase = SupabaseSync(
             self.config.get("supabase_url", "") or "https://ratezylqpxgruyjscpbu.supabase.co",
-            self.config.get("supabase_key", "") or "sb_publishable_hI8WF4abCLXa3SvVrChszA_z-Udl584",
+            self.config.get("supabase_key", "") or "sb_publishable_P8BT37b8iYnHHisNegOU6w_dqqP3dGB",
         )
         self.auth = AuthManager(self.supabase._client)
 
@@ -631,7 +631,34 @@ def _start_quest_sightings(app: AppState):
 
     # Flush last session's leftovers now (app open). Uploading is idempotent and resumable,
     # so a crash mid-send costs nothing.
-    qsync.upload_async(queue_path, on_done=lambda n: log.info("uploaded %s quest sighting(s)", n))
+    def _sighting_token():
+        """Bearer for Path Marks on sighting upload (optional; unauthed still banks dialogue)."""
+        try:
+            auth = getattr(app, "auth", None)
+            if auth is not None:
+                tok = getattr(auth, "access_token", None)
+                if callable(tok):
+                    tok = tok()
+                if tok:
+                    return tok
+            sb = getattr(app, "supabase", None)
+            if sb is not None:
+                # refresh so long sessions still credit Path
+                if hasattr(sb, "_refresh_token"):
+                    try:
+                        sb._refresh_token()
+                    except Exception:
+                        pass
+                return getattr(sb, "_auth_token", None)
+        except Exception:
+            return None
+        return None
+
+    qsync.upload_async(
+        queue_path,
+        get_token=_sighting_token,
+        on_done=lambda n: log.info("uploaded %s quest sighting(s)", n),
+    )
     log.info("quest sightings active (player=%s, %s known ids cached)", player or "?", len(known))
 
 
@@ -711,7 +738,25 @@ def _shutdown(app: AppState):
         try:
             if getattr(app, "quest_sightings", None):
                 from app import quest_sighting_sync as qsync
-                qsync.upload_async(app.quest_sightings.queue_path)
+                def _tok():
+                    try:
+                        auth = getattr(app, "auth", None)
+                        if auth is not None:
+                            t = getattr(auth, "access_token", None)
+                            if callable(t):
+                                t = t()
+                            if t:
+                                return t
+                        sb = getattr(app, "supabase", None)
+                        if sb is not None and hasattr(sb, "_refresh_token"):
+                            try:
+                                sb._refresh_token()
+                            except Exception:
+                                pass
+                        return getattr(sb, "_auth_token", None) if sb else None
+                    except Exception:
+                        return None
+                qsync.upload_async(app.quest_sightings.queue_path, get_token=_tok)
         except Exception:
             log.debug("sighting flush on shutdown failed", exc_info=True)
         app.log_watcher.stop()
