@@ -16,11 +16,13 @@ Supabase setup required:
   to "Redirect URLs".
 """
 
+import base64
 import http.server
 import json
 import logging
 import os
 import threading
+import time
 import urllib.parse
 import webbrowser
 from typing import Callable, Optional
@@ -77,6 +79,22 @@ class AuthManager:
 
     def set_auth_change_callback(self, fn: Callable):
         self._on_auth_change = fn
+
+    def persist_refreshed_session(self, access_token: str, refresh_token: str):
+        """Re-save after the client rotated the tokens underneath us.
+
+        Supabase refresh tokens are SINGLE USE. Every background refresh mints a
+        new one and kills the old, so the pair on disk must be rewritten each
+        time or the next launch presents a spent token and the user is forced to
+        log in again. SupabaseSync._refresh_token calls this via
+        `on_session_refreshed`. Wired in main.py.
+        """
+        if not (access_token and refresh_token):
+            return
+        self._access_token = access_token
+        if self._user:
+            self._save_session(access_token, refresh_token, self._user)
+            log.info("Saved rotated session tokens.")
 
     @property
     def is_logged_in(self) -> bool:
@@ -179,24 +197,84 @@ class AuthManager:
 
     # ── Session restore ──────────────────────────────────────────────────────
 
+    @staticmethod
+    def _token_expired(access_token: str) -> bool:
+        """True if the JWT's exp is in the past (or unreadable)."""
+        try:
+            payload = access_token.split(".")[1]
+            payload += "=" * (-len(payload) % 4)
+            exp = json.loads(base64.urlsafe_b64decode(payload)).get("exp")
+            return bool(exp) and exp <= time.time()
+        except Exception:
+            return True     # unreadable -> treat as expired and refresh
+
     def restore_session(self):
-        """Attempt to restore a saved auth session on launch."""
+        """Attempt to restore a saved auth session on launch.
+
+        FIXED 2026-08-03 — users were being logged out on every launch.
+
+        Three separate faults, all silent:
+
+        1. `set_session(access, refresh)` was called even when the access token
+           had ALREADY EXPIRED. supabase-py does not reliably refresh from an
+           expired access token, and returns a session object with no `user`
+           instead of raising — so `if session and session.user` was simply
+           false and the whole function did nothing at all. No exception, no
+           log, no restore. We now check `exp` and call refresh_session()
+           directly when it is stale.
+
+        2. Failures logged at DEBUG, which is off in shipped builds. Anything
+           that loses a login is at least WARNING.
+
+        3. `_clear_session()` on ANY exception. A network blip on launch
+           therefore DELETED a perfectly good refresh token and forced a real
+           re-login. We now only clear when the server explicitly rejects the
+           grant; transient errors leave the file alone so the next launch can
+           retry.
+        """
         if not self._client:
             return
         saved = self._load_session()
         if not saved:
             return
+        access = saved.get("access_token") or ""
+        refresh = saved.get("refresh_token") or ""
+        if not refresh:
+            log.warning("Saved session has no refresh token; cannot restore.")
+            return
+
+        session = None
         try:
-            session = self._client.auth.set_session(saved["access_token"], saved["refresh_token"])
-            if session and session.user:
-                self._user = session.user.model_dump()
-                self._access_token = session.session.access_token if session.session else None
-                if session.session and session.session.refresh_token:
-                    self._save_session(self._access_token, session.session.refresh_token, self._user)
-                log.info("Session restored for: %s", self.username)
+            if access and not self._token_expired(access):
+                session = self._client.auth.set_session(access, refresh)
+            else:
+                # Stale (the normal case — access tokens last ~1h, launches don't).
+                log.info("Access token expired; refreshing from the stored refresh token.")
+                session = self._client.auth.refresh_session(refresh)
         except Exception as e:
-            log.debug("Could not restore session: %s", e)
-            self._clear_session()
+            msg = str(e).lower()
+            fatal = any(k in msg for k in
+                        ("invalid_grant", "invalid refresh", "already used",
+                         "not found", "revoked", "expired"))
+            if fatal:
+                log.warning("Refresh token rejected (%s); clearing saved session.", e)
+                self._clear_session()
+            else:
+                # Offline / DNS / 5xx — keep the token and try again next launch.
+                log.warning("Could not restore session (transient, keeping it): %s", e)
+            return
+
+        if not (session and getattr(session, "user", None)):
+            # The silent path that caused the bug. Say so loudly instead.
+            log.warning("Session restore returned no user; staying logged out. "
+                        "Saved token kept for the next attempt.")
+            return
+
+        self._user = session.user.model_dump()
+        self._access_token = session.session.access_token if session.session else None
+        if session.session and session.session.refresh_token:
+            self._save_session(self._access_token, session.session.refresh_token, self._user)
+        log.info("Session restored for: %s", self.username)
 
 
 # ── Minimal callback HTTP server ──────────────────────────────────────────────

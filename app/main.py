@@ -278,6 +278,12 @@ class AppState:
             self.config.get("supabase_key", "") or "sb_publishable_P8BT37b8iYnHHisNegOU6w_dqqP3dGB",
         )
         self.auth = AuthManager(self.supabase._client)
+        # Supabase refresh tokens are SINGLE USE — every background refresh
+        # rotates them. Without this hook the pair saved in .session.json goes
+        # stale within the hour, and the next launch is met with "Invalid
+        # Refresh Token: Already Used" and a forced re-login. That was the
+        # every-single-time logout bug. Fixed 2026-08-03.
+        self.supabase.on_session_refreshed = self.auth.persist_refreshed_session
 
         # Alert engine
         self.alert_engine = AlertEngine()
@@ -537,7 +543,26 @@ def _on_turn_in(app: AppState, evt):
 
     for q in completed:
         qid = q.get("id")
-        threading.Thread(target=lambda i=qid: app.supabase.remove_quest(i), daemon=True).start()
+        # MARK completed, do NOT delete (changed 2026-08-03).
+        #
+        # This used to call remove_quest(), which deleted the user_quests row
+        # outright. That threw away the single most valuable signal we collect:
+        # proof that a specific player actually finished a specific quest. It is
+        # why only 1 of 76 journal rows read 'completed' — the rest were deleted
+        # as they completed.
+        #
+        # That record is the weight-4 evidence tier the community quest
+        # verification spec is built on: "this person provably did this quest"
+        # is worth 4 votes, versus 1 for someone who merely says they know it.
+        # See updates/2026-08-01-SPEC-community-quest-verification.md
+        #
+        # The quest still disappears from the active journal view because it is
+        # removed from app._journal_quests below — the UI behaviour is unchanged,
+        # only the durable record survives.
+        threading.Thread(
+            target=lambda i=qid: app.supabase.set_quest_status(i, "completed"),
+            daemon=True,
+        ).start()
     if completed:
         done_ids = {q.get("id") for q in completed}
         app._journal_quests = [q for q in app._journal_quests if q.get("id") not in done_ids]
@@ -616,6 +641,90 @@ def _start_quest_sightings(app: AppState):
     app.log_watcher.on_dialogue(
         lambda evt: collector.on_dialogue(evt.npc_name, evt.text))
     app.log_watcher.on_zone(lambda z: collector.set_zone(z))
+
+    def _current_access_token(app_state):
+        """The signed-in user's JWT, or None. Tolerates access_token being a property
+        or a method, and never raises — a signed-out user just keeps queuing locally."""
+        try:
+            auth = getattr(app_state, "auth", None)
+            tok = getattr(auth, "access_token", None) if auth is not None else None
+            return tok() if callable(tok) else tok
+        except Exception:
+            return None
+
+    # ── log observations: crafts, turn-ins, kills, zones, loot ───────────────
+    # Until 2026-07-30 only DIALOGUE was ever uploaded; loot/kills/zones/turn-ins fed the
+    # local journal and went nowhere, so 30 installs generated data nobody could see.
+    # Queue is durable (JSONL + byte offset) so a crash or a closed laptop loses nothing.
+    # GAME NOUNS ONLY — no player or character names ever go into a payload.
+    try:
+        from app.sync.log_observations import ObservationQueue
+        from app.telemetry import get_or_create_install_id
+
+        # Same %APPDATA%\GnollGuard dir the sightings queue already uses (`user_dir`,
+        # set just above) — one place for everything per-user.
+        obs = ObservationQueue(
+            data_dir=user_dir,
+            archive_dir=os.path.join(_LOG_DIR, "logs_archive"),
+            install_id=get_or_create_install_id(),
+            # Resolve the bearer LAZILY at flush time. Referencing _sighting_token here
+            # raised UnboundLocalError — it is defined further down this function — and
+            # a late resolve is correct anyway: the user may sign in after startup.
+            get_token=lambda: _current_access_token(app),
+            anon_key=app.config.get("supabase_key", "")
+            or "sb_publishable_P8BT37b8iYnHHisNegOU6w_dqqP3dGB",
+        )
+        app.observations = obs
+
+        _zone_now = {"z": None}
+        app.log_watcher.on_zone(lambda z: _zone_now.__setitem__("z", z))
+        app.log_watcher.on_craft(lambda c: obs.add(
+            "craft", {"item": c.item_name, "success": c.success}, _zone_now["z"]))
+        def _turn_in_obs(t):
+            """Turn-in observation, with the player's last /loc attached.
+
+            The position at a hand-in is approximately where the NPC stands —
+            the player had to be next to them. That is the only source of NPC
+            coordinates we have: the `entities` table (loc_x/y/z) is empty
+            because nothing ever captured /loc. See log_watcher.last_loc.
+
+            ⚠ APPROXIMATE and explicitly labelled so. `loc_age_s` lets the
+            server discard a stale fix, and nothing here may overwrite a
+            location a human has confirmed.
+            """
+            payload = {"item": t.item_name, "npc": t.npc_name,
+                       "verdict": getattr(t, "verdict", "unknown")}
+            loc = app.log_watcher.last_loc()
+            if loc:
+                payload["loc"] = {"x": loc["x"], "y": loc["y"], "z": loc["z"],
+                                  "zone": loc.get("zone")}
+                payload["loc_approx"] = True
+                payload["loc_age_s"] = loc.get("age_s")
+            obs.add("turn_in", payload, _zone_now["z"])
+
+        app.log_watcher.on_turn_in(_turn_in_obs)
+        app.log_watcher.on_kill(lambda mob: obs.add("kill", {"mob": mob}, _zone_now["z"]))
+        app.log_watcher.on_zone(lambda z: obs.add("zone", {"zone": z}, z))
+        app.log_watcher.on_loot(lambda ev: obs.add(
+            "loot", {"item": getattr(ev, "item_name", None),
+                     "mob": getattr(ev, "mob_name", None)}, _zone_now["z"]))
+
+        # Upload on a background timer, then prune OUR archived log copies — never the
+        # live EQ log. Pruning only runs after a CONFIRMED upload, so a user who is
+        # signed out keeps their archives until the data is safely off the machine.
+        def _obs_pump():
+            while True:
+                time.sleep(120)
+                try:
+                    if obs.flush() > 0:
+                        obs.prune_archives(keep_days=2)
+                except Exception:
+                    log.debug("observation pump error", exc_info=True)
+
+        threading.Thread(target=_obs_pump, name="obs-pump", daemon=True).start()
+    except Exception:
+        log.exception("log observation queue not started (app continues without it)")
+        app.observations = None
 
     # The player's own line is the conversation anchor ("You say, 'Hail, Guard Bml'") and
     # marks when a bracket phrase was repeated back — the NPC's next line is then the chain

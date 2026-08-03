@@ -1,5 +1,63 @@
-"""
-Settings tab content. Rendered inside the main window's tab view.
+"""Settings panel — renders and handles every user-configurable option.
+
+Covers log file paths, UI theme, pop-out quest overlay styling, the community
+database connection, Discord authentication, app updates, and local storage /
+cache management. Rendered inside the main window's tab view.
+
+⚠ THE ATTRIBUTE TRAP THAT BROKE v1.5.15
+    __init__ takes `app_state` as a PARAMETER and stores it as `self._app`.
+    There is no `self.app_state`. Two helpers in the Storage section used the
+    parameter name, so building the tab raised AttributeError and the whole
+    panel rendered "Settings failed to load" — which ALSO locked users out of
+    the theme switch, because that lives here. Use `self._app`.
+
+
+LAZY AND DEFENSIVE RENDERING
+    CustomTkinter has a layout bug where a CTkScrollableFrame built while its
+    parent is hidden (0×0) renders permanently blank. Several defences exist and
+    none of them are decorative:
+
+    * `ensure_visible()` / `_build()` — show a lightweight "Loading settings…"
+      placeholder first and defer the real build until the tab is actually
+      mapped and visible. This is the fix for the classic "Settings is blank"
+      report.
+    * `_nudge_scroll_layout()` — force the internal canvas to recompute its size
+      and scrollregion once the window has real dimensions.
+    * `_ensure_tk_default_root()` — restore a default tkinter root. Destroying
+      the boot splash can leave tkinter without one, and the next font lookup
+      then raises at runtime.
+
+
+SECTIONS
+
+    Logs directory — `_browse_log_folder()`
+        Set or browse for the EverQuest Legends `Logs` directory.
+        ⚠ `_save()` validates the choice and REFUSES a live-EverQuest log
+        directory. Live-EQ logs are format-identical to Legends, so attaching to
+        one would push live-EQ quest dialogue into the Legends community
+        database. Do not weaken this guard.
+
+    Display & overlay — `_build_overlay_typography()`, `_apply_overlay_opacity()`
+        Light/Dark theme, plus pop-out quest overlay opacity, font family and
+        text scale, with live preview.
+
+    Community & account
+        Supabase connection status; Discord OAuth via `_sign_in_discord()` /
+        `_sign_out()`.
+
+    Updates — `_check_for_updates()`
+        Asks the background updater thread to check now.
+
+    Storage & cache — `_cache_label()`, `_clear_cache()`
+        Reports the disk space Gnoll Guard's own archived log copies use, flushes
+        any queued observations, and clears the cache.
+        ⚠ Only ever touches OUR archived copies — never the player's real
+        EverQuest log files.
+
+    Persistence — `_save()`
+        Collects every input, updates `self._app.config`, writes it through
+        `self._app.save_config()`, and tells the log watcher if the directory
+        changed.
 """
 
 import logging
@@ -297,6 +355,29 @@ class SettingsTab(ctk.CTkFrame):
             command=self._check_for_updates,
         ).pack(anchor="w", pady=(0, theme.PAD))
 
+        # ── Storage ──────────────────────────────────────────────────────────
+        # The app archives copies of the EQ log so it can re-scan them; those add up.
+        # Uploading prunes them automatically, but give the user a manual lever too.
+        self._section(scroll, "Storage")
+        self._cache_var = ctk.StringVar(value=self._cache_label())
+        ctk.CTkLabel(
+            scroll, textvariable=self._cache_var,
+            font=theme.FONT_BODY, text_color=theme.TEXT_MUTED, anchor="w",
+        ).pack(anchor="w", pady=(0, theme.PAD_SM))
+        ctk.CTkLabel(
+            scroll,
+            text="Clearing uploads anything still queued first, then deletes Gnoll Guard's "
+                 "own archived copies of your log. Your EverQuest log files are never touched.",
+            font=theme.FONT_BODY, text_color=theme.TEXT_MUTED, anchor="w",
+            justify="left", wraplength=520,
+        ).pack(anchor="w", pady=(0, theme.PAD_SM))
+        ctk.CTkButton(
+            scroll, text="Clear Cache",
+            fg_color=theme.PANEL, text_color=theme.TEXT_PRIMARY,
+            hover_color=theme.PANEL_HOVER, font=theme.FONT_BODY,
+            command=self._clear_cache,
+        ).pack(anchor="w", pady=(0, theme.PAD))
+
         ctk.CTkButton(
             scroll, text="Save Settings",
             fg_color=theme.GOLD, text_color=theme.BG,
@@ -304,6 +385,42 @@ class SettingsTab(ctk.CTkFrame):
             command=self._save,
         ).pack(anchor="w", pady=(theme.PAD, 0))
         self._built_while_mapped = True
+
+    # ── Storage helpers ──────────────────────────────────────────────────────
+
+    def _cache_label(self) -> str:
+        # self._app, not self.app_state — the constructor takes `app_state` as a
+        # PARAMETER and stores it as self._app (line 21). These two helpers used
+        # the parameter name, so every attempt to build the Settings tab raised
+        # AttributeError and the whole tab showed "Settings failed to load".
+        # The getattr default never helped: the error was on self.app_state
+        # itself, before the attribute lookup. Fixed 2026-08-03.
+        obs = getattr(self._app, "observations", None)
+        if obs is None:
+            return "Cache: unavailable"
+        try:
+            mb = obs.disk_usage() / 1048576
+            return (f"Using {mb:.1f} MB  ·  {obs.queued} observation(s) queued, "
+                    f"{obs.uploaded} uploaded this session")
+        except Exception:
+            return "Cache: unavailable"
+
+    def _clear_cache(self):
+        # self._app, not self.app_state — the constructor takes `app_state` as a
+        # PARAMETER and stores it as self._app (line 21). These two helpers used
+        # the parameter name, so every attempt to build the Settings tab raised
+        # AttributeError and the whole tab showed "Settings failed to load".
+        # The getattr default never helped: the error was on self.app_state
+        # itself, before the attribute lookup. Fixed 2026-08-03.
+        obs = getattr(self._app, "observations", None)
+        if obs is None:
+            return
+        try:
+            files, freed = obs.clear_cache()
+            self._cache_var.set(
+                f"Cleared {files} file(s), freed {freed / 1048576:.1f} MB")
+        except Exception:
+            self._cache_var.set("Clear failed — see app.log")
 
     # ── Helpers ──────────────────────────────────────────────────────────────
 

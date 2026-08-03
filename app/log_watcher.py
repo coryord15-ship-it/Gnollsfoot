@@ -76,6 +76,14 @@ class LogWatcher:
         # reference_eql_log_formats). Feeds quest_matcher's `kill` trigger type.
         self._kill_pattern = re.compile(
             patterns.get("kill_line", r"You have slain (?P<mob>.+?)!"), re.IGNORECASE)
+        # /loc — the pattern has lived in settings.json ("loc_output") since the
+        # start but nothing ever compiled it. See _dispatch for why it matters.
+        self._loc_pattern = re.compile(
+            patterns.get("loc_output",
+                         r"Your Location is (?P<x>-?[\d.]+), (?P<y>-?[\d.]+), (?P<z>-?[\d.]+)"),
+            re.IGNORECASE,
+        )
+        self._last_loc: Optional[dict] = None
         self._current_zone = None
         self._current_difficulty = None
 
@@ -86,6 +94,12 @@ class LogWatcher:
         self._on_zone: list[Callable[[str], None]] = []
         self._on_kill: list[Callable[[str], None]] = []
         self._on_any_line: list[Callable[[str], None]] = []  # raw-line callbacks (matcher hail/say, …)
+        self._on_craft: list[Callable] = []                  # tradeskill combines
+        # An offer's verdict lives in the NEXT few lines, so hold the pending offer and
+        # emit it once we have seen enough to classify it. Without this we would publish
+        # every offer as a turn-in, including the ones the NPC refused.
+        self._pending_offer = None
+        self._pending_after: list[str] = []
 
         self.status = "stopped"  # 'watching' | 'paused' | 'error' | 'stopped'
         self._partial_line = ""  # buffer for incomplete lines between watchdog reads
@@ -95,9 +109,30 @@ class LogWatcher:
     def on_loot(self, fn): self._on_loot.append(fn)
     def on_dialogue(self, fn): self._on_dialogue.append(fn)
     def on_turn_in(self, fn): self._on_turn_in.append(fn)
+
+    def last_loc(self, max_age_s: float = 900.0) -> Optional[dict]:
+        """The most recent /loc, or None if there isn't a recent enough one.
+
+        Returns {x, y, z, zone, age_s}. `max_age_s` guards against attaching a
+        position from an hour and three zones ago to a hand-in — an old fix is
+        worse than no fix, because it looks like data.
+
+        `age_s` is computed HERE rather than by the caller: this class owns the
+        timestamp, and it saves every consumer from needing its own clock import.
+        """
+        loc = self._last_loc
+        if not loc:
+            return None
+        age = time.time() - loc.get("at", 0)
+        if max_age_s and age > max_age_s:
+            return None
+        out = dict(loc)
+        out["age_s"] = round(age, 1)
+        return out
     def on_zone(self, fn): self._on_zone.append(fn)
     def on_kill(self, fn): self._on_kill.append(fn)
     def on_any_line(self, fn): self._on_any_line.append(fn)
+    def on_craft(self, fn): self._on_craft.append(fn)
 
     # ── Lifecycle ────────────────────────────────────────────────────────────
 
@@ -124,6 +159,13 @@ class LogWatcher:
                  ", ".join(os.path.basename(m) for m in matches) or "none yet")
 
     def stop(self):
+        # A hand-in waiting on its verdict would otherwise be lost when the app closes —
+        # the queue holds it for 5 lines and a session can end inside that window. Emit it
+        # with whatever verdict we have (usually 'unknown'), which is still worth keeping.
+        try:
+            self._flush_offer()
+        except Exception:
+            log.debug("pending offer flush on stop failed", exc_info=True)
         self._running = False
         if self._observer:
             self._observer.stop()
@@ -279,6 +321,45 @@ class LogWatcher:
         if not self._ts_pattern.match(line):
             return
 
+        # A pending offer is waiting to learn whether the NPC took it, and the answer is
+        # usually a DIALOGUE line ("<NPC> says, 'I have no need for this…'"). This must run
+        # BEFORE the per-parser returns below, or the dialogue branch consumes the verdict
+        # and every refused hand-in is recorded as 'unknown'. Collect first, decide later.
+        if self._pending_offer is not None:
+            self._pending_after.append(line)
+            if len(self._pending_after) >= 5:
+                self._flush_offer()
+
+        # /loc — "Your Location is 123.45, -67.89, 12.00"
+        #
+        # Added 2026-08-03. The regex has been sitting unused in settings.json
+        # ("loc_output") since the beginning: the app read entity coordinates FROM
+        # the database but never captured the player's own position, so the
+        # `entities` table (loc_x/loc_y/loc_z) has zero rows and we cannot tell
+        # anyone where a quest NPC actually stands.
+        #
+        # We only remember the most recent fix. On a quest hand-in, that position
+        # is approximately where the NPC is — the player was standing next to them
+        # to hand the item over.
+        #
+        # ⚠ APPROXIMATE. The player may have moved between typing /loc and the
+        # hand-in, which is why the timestamp is kept: a consumer can discard a
+        # fix that is too old to be meaningful. Never let a correlated position
+        # overwrite one a human confirmed.
+        lm = self._loc_pattern.search(line) if self._loc_pattern else None
+        if lm:
+            try:
+                self._last_loc = {
+                    "x": float(lm.group("x")),
+                    "y": float(lm.group("y")),
+                    "z": float(lm.group("z")),
+                    "zone": self._current_zone,
+                    "at": time.time(),
+                }
+            except (ValueError, IndexError):
+                pass
+            return
+
         # Zone change — "You have entered <Zone> <N> (<Label>)." or the status echo
         # "You are currently in: <Zone> <N> (<Label>)". EQL appends a difficulty
         # suffix; strip it (captured separately) and fire only when the clean zone
@@ -311,20 +392,47 @@ class LogWatcher:
                 except Exception: log.exception("on_kill callback error")
             return
 
+        # ⚠ parse_dialogue returns a DialogueEvent with EMPTY npc_name/text for lines that
+        # are not dialogue at all, and an empty dataclass is still TRUTHY. So a bare
+        # `if dialogue:` matched EVERY line and returned — making everything below this
+        # point unreachable dead code. That is why quest turn-ins never fired even before
+        # the regex was wrong: two bugs stacked. Require a real speaker. (2026-07-30)
         dialogue = self._npc_parser.parse_dialogue(line)
-        if dialogue:
+        if dialogue and getattr(dialogue, "npc_name", "").strip():
             for fn in self._on_dialogue:
                 try: fn(dialogue)
                 except Exception: log.exception("on_dialogue callback error")
             return
 
-        # Quest turn-in — silent, feeds the journal
+        # Tradeskill combine — feeds the recipe/item DB
+        craft = self._event_parser.parse_craft(line)
+        if craft:
+            for fn in self._on_craft:
+                try: fn(craft)
+                except Exception: log.exception("on_craft callback error")
+            return
+
+        # Quest turn-in — silent, feeds the journal. Held until classified.
         turn_in = self._event_parser.parse_turn_in(line)
         if turn_in:
-            for fn in self._on_turn_in:
-                try: fn(turn_in)
-                except Exception: log.exception("on_turn_in callback error")
+            self._flush_offer()          # emit any previous one first
+            self._pending_offer = turn_in
+            self._pending_after = []
             return
+
+    def _flush_offer(self):
+        """Classify the held offer against the lines that followed, then emit it."""
+        offer, after = self._pending_offer, self._pending_after
+        self._pending_offer, self._pending_after = None, []
+        if offer is None:
+            return
+        try:
+            offer = self._event_parser.classify_turn_in(offer, after)
+        except Exception:
+            log.exception("turn-in classification error")
+        for fn in self._on_turn_in:
+            try: fn(offer)
+            except Exception: log.exception("on_turn_in callback error")
 
     def rescan_recent(
         self,

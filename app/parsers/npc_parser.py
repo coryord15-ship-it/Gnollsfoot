@@ -23,7 +23,15 @@ class NPCParser:
         self._reload(patterns)
 
     def _reload(self, patterns: dict):
-        self._dialogue = re.compile(patterns.get("npc_dialogue", ""), re.IGNORECASE)
+        # ⚠ The fallback used to be "" — an EMPTY REGEX, which matches every line at
+        # position 0 with no groups. Any install whose settings.json lacked
+        # `npc_dialogue` would therefore treat EVERY log line as dialogue, and because
+        # log_watcher._dispatch returns after a dialogue match, everything below that
+        # point (turn-ins, crafts) became unreachable. Ship a real default. (2026-07-30)
+        self._dialogue = re.compile(
+            patterns.get("npc_dialogue")
+            or r"(?P<npc>[\w ]+) says(?:, '| ')(?P<text>.+?)'?$",
+            re.IGNORECASE)
 
     def reload(self, patterns: dict):
         self._reload(patterns)
@@ -33,11 +41,20 @@ class NPCParser:
         if not m:
             return None
         g = m.groupdict()
-        return DialogueEvent(
-            npc_name=g.get("npc", "").strip(),
-            text=g.get("text", "").strip(),
-            raw_line=line,
-        )
+        npc = (g.get("npc") or "").strip()
+        text = (g.get("text") or "").strip()
+        # ⚠ A dying mob emits "Orc legionnaire's corpse says, 'You shall have all the
+        # Crushbone orc legions on your tail!'". The name pattern is [\w ]+, which stops
+        # at the apostrophe, so it captured the NPC as literally "s corpse" — which became
+        # the single most common "NPC" in the whole log (2026-07-30 audit) and inflated the
+        # distinct-NPC count to 415. Death taunts are combat flavour, never quest dialogue.
+        if not npc or npc.lower().endswith("corpse") or "' corpse says" in line \
+                or "'s corpse says" in line:
+            return None
+        # A bare "s"/"S" left over from any other possessive is garbage, not a name.
+        if len(npc) < 2:
+            return None
+        return DialogueEvent(npc_name=npc, text=text, raw_line=line)
 
 
 # ── Hint extraction ───────────────────────────────────────────────────────────

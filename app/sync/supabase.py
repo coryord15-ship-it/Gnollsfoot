@@ -112,7 +112,18 @@ class SupabaseSync:
     def _refresh_token(self):
         """Keep the Bearer token fresh for the raw requests calls. Our cached token
         can go stale on a long session even though the client refreshes its own
-        session, which 401s authed GET/POSTs (e.g. the Quest Journal)."""
+        session, which 401s authed GET/POSTs (e.g. the Quest Journal).
+
+        ⚠ THE REFRESH TOKEN MUST BE PERSISTED HERE. Supabase refresh tokens are
+        SINGLE USE: every refresh_session() call rotates them and invalidates the
+        old one. This method used to keep only the access token, so each refresh
+        silently turned the refresh_token saved in .session.json into a corpse.
+        Next launch it came back "Invalid Refresh Token: Already Used" and the
+        user had to log in again — every single time. Fixed 2026-08-03.
+
+        `on_session_refreshed` is set by AuthManager and writes the NEW pair to
+        disk. If you add another refresh path, it must call it too.
+        """
         if not self._client:
             return
         try:
@@ -126,6 +137,15 @@ class SupabaseSync:
                 self._auth_token = tok
                 self._apply_postgrest_auth(tok)
             self._last_token_refresh = _t.time()
+
+            # Persist the rotated pair. Without this the saved session dies.
+            cb = getattr(self, "on_session_refreshed", None)
+            new_refresh = getattr(sess, "refresh_token", None)
+            if cb and tok and new_refresh:
+                try:
+                    cb(tok, new_refresh)
+                except Exception:
+                    log.exception("on_session_refreshed callback failed")
         except Exception as e:
             log.debug("token refresh failed: %s", e)
 

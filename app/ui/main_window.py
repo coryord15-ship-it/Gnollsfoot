@@ -1019,28 +1019,92 @@ class MainWindow(ctk.CTk):
     # ── In-app updater ────────────────────────────────────────────────────────
 
     def _install_update(self, page_url: str):
+        """Download the installer and hand off to it.
+
+        HARDENED 2026-08-03. The previous version ran whatever came back from the
+        URL without checking it. `/api/download` is a redirect to GitHub, and when
+        that path breaks it returns an HTML ERROR PAGE, not an installer — exactly
+        what happened on 2026-07-27 when the private repo gated release assets and
+        every download 404'd. The app would have cheerfully executed that HTML.
+
+        Now it: downloads to a .part file, verifies size and the MZ (PE) header,
+        only then renames to .exe and launches. Any failure falls back to opening
+        the download page rather than leaving the user stuck.
+        """
         import tkinter.messagebox as _mb
-        import urllib.request, tempfile, os, subprocess, threading
+        import os
+        import subprocess
+        import tempfile
+        import threading
+        import urllib.request
+        import webbrowser
 
         if not _mb.askyesno("Update Gnoll Guard",
                              "Download and install the latest version now?\n\n"
                              "The app will close automatically to run the installer."):
             return
 
-        # Resolve direct installer URL from the download page URL
         installer_url = "https://gnollguard.com/api/download"
+        fallback_page = page_url or "https://gnollguard.com/download"
+        MIN_BYTES = 5 * 1024 * 1024        # a real build is ~49 MB; an error page is bytes
+
+        def _fail(msg: str):
+            def _show():
+                _mb.showerror(
+                    "Update Failed",
+                    f"{msg}\n\nOpening the download page so you can grab it manually.")
+                try:
+                    webbrowser.open(fallback_page)
+                except Exception:
+                    pass
+            self.safe_after(0, _show)
 
         def _do():
+            part = os.path.join(tempfile.gettempdir(), "GnollGuard-Setup.exe.part")
+            final = os.path.join(tempfile.gettempdir(), "GnollGuard-Setup.exe")
             try:
-                tmp = os.path.join(tempfile.gettempdir(), "GnollGuard-Setup.exe")
-                self.safe_after(0, lambda: _mb.showinfo("Downloading…",
-                    "Downloading update. The app will close and the installer will open."))
-                urllib.request.urlretrieve(installer_url, tmp)
-                subprocess.Popen([tmp])
+                self.safe_after(0, lambda: _mb.showinfo(
+                    "Downloading…",
+                    "Downloading the update (about 50 MB).\n\n"
+                    "This can take a minute on a slow connection — please leave the "
+                    "app open. It will close by itself when the installer starts."))
+
+                # .part first: a partial or interrupted download must never be
+                # left sitting at the path we execute.
+                urllib.request.urlretrieve(installer_url, part)
+
+                size = os.path.getsize(part)
+                if size < MIN_BYTES:
+                    os.remove(part)
+                    _fail(f"The download was only {size:,} bytes — that is an error "
+                          f"page, not the installer.")
+                    return
+
+                # Windows executables start with 'MZ'. An HTML error page does not.
+                with open(part, "rb") as fh:
+                    if fh.read(2) != b"MZ":
+                        os.remove(part)
+                        _fail("The downloaded file is not a Windows program. "
+                              "The download link may be broken.")
+                        return
+
+                if os.path.exists(final):
+                    os.remove(final)
+                os.replace(part, final)
+
+                subprocess.Popen([final])
+                # Give the installer a moment to start before we release the
+                # executable lock by exiting.
+                import time as _t
+                _t.sleep(1.5)
                 os._exit(0)
             except Exception as e:
-                self.safe_after(0, lambda: _mb.showerror("Update Failed",
-                    f"Could not download update:\n{e}\n\nTry downloading manually at gnollguard.com/download"))
+                try:
+                    if os.path.exists(part):
+                        os.remove(part)
+                except OSError:
+                    pass
+                _fail(f"Could not download the update:\n{e}")
 
         threading.Thread(target=_do, daemon=True).start()
 

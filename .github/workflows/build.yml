@@ -37,6 +37,31 @@ jobs:
           $v = python -c "from app.version import __version__; print(__version__)"
           echo "version=$v" >> $env:GITHUB_OUTPUT
 
+      # ── Guard: the tag MUST match app/version.py ───────────────────────────────
+      # On 2026-08-03 we found that v1.5.15 AND v1.5.16 were both built from commit
+      # ee4b55c, where version.py still said 1.5.13. Checkout takes the TAGGED
+      # COMMIT, but the release is published under github.ref_name — so a tag
+      # pushed at a stale commit ships an OLD BUILD UNDER A NEW VERSION NUMBER.
+      #
+      # It failed silently and completely: users installed "1.5.16", the app
+      # reported 1.5.13, the updater offered 1.5.16 again, forever. Two whole
+      # releases reached nobody.
+      #
+      # The build must not be able to lie about its own version again.
+      - name: Verify tag matches app/version.py
+        if: github.ref_type == 'tag'
+        shell: pwsh
+        run: |
+          $tag = "${{ github.ref_name }}" -replace '^v',''
+          $src = "${{ steps.ver.outputs.version }}"
+          if ($tag -ne $src) {
+            Write-Host "::error::Tag v$tag does not match app/version.py ($src)."
+            Write-Host "::error::You almost certainly tagged a commit that predates the version bump."
+            Write-Host "::error::Commit the bump, then re-tag that commit. Refusing to publish."
+            exit 1
+          }
+          Write-Host "OK - tag v$tag matches app/version.py ($src)"
+
       - name: Ensure Inno Setup is installed
         run: choco install innosetup --no-progress -y
 
