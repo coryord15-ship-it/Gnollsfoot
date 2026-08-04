@@ -1044,7 +1044,15 @@ class MainWindow(ctk.CTk):
                              "The app will close automatically to run the installer."):
             return
 
-        installer_url = "https://gnollguard.com/api/download"
+        # Both hosts serve the SAME deployment. The second exists because some
+        # ISP filters block gnollguard.com outright — Comcast/Xfinity did on
+        # 2026-08-04, on domain reputation (unsigned exe, weeks-old domain). The
+        # older domain resolves to a different IP and got through. Without this
+        # fallback, an affected user can install but can never UPDATE.
+        installer_urls = (
+            "https://gnollguard.com/api/download",
+            "https://legendsgnollloot.com/api/download",
+        )
         fallback_page = page_url or "https://gnollguard.com/download"
         MIN_BYTES = 5 * 1024 * 1024        # a real build is ~49 MB; an error page is bytes
 
@@ -1071,7 +1079,22 @@ class MainWindow(ctk.CTk):
 
                 # .part first: a partial or interrupted download must never be
                 # left sitting at the path we execute.
-                urllib.request.urlretrieve(installer_url, part)
+                #
+                # Try each host in turn. Only a genuinely unreachable host moves
+                # on — a host that answers with something wrong is caught by the
+                # size and MZ checks below, and must NOT be retried elsewhere,
+                # because that would mask a broken release as a network problem.
+                last_err = None
+                for _url in installer_urls:
+                    try:
+                        urllib.request.urlretrieve(_url, part)
+                        last_err = None
+                        break
+                    except Exception as e:
+                        last_err = e
+                if last_err is not None:
+                    _fail(f"Could not reach the download server.\n\n{last_err}")
+                    return
 
                 size = os.path.getsize(part)
                 if size < MIN_BYTES:
