@@ -164,9 +164,17 @@ class QuestSightingCollector:
     Fed from log_watcher callbacks. Deliberately cheap: the log watcher thread runs hot, so
     this does string work and an append — never a network call or a DB write."""
 
-    def __init__(self, queue_path: str, player: str = "", known: set | None = None):
+    def __init__(self, queue_path: str, player: str = "", known: set | None = None,
+                 roster=None):
         self.queue_path = queue_path
         self.player = player
+        # ⚠ THE PRIVACY GATE. This class stores the speaker VERBATIM and _norm()
+        # strips only the LOCAL user's names from the text — another player's name
+        # and message would go up intact. Deny by default: with a roster attached,
+        # a speaker must carry positive NPC evidence to be queued. Without one we
+        # fail closed on proven players only, so an older caller still gets the
+        # essential protection. See app/player_roster.py.
+        self.roster = roster
         self.known = known or set()      # ids the server already has → never queue them
         self.wanted = set()              # ids/NPCs we're specifically missing a reply for
         self.zone = ""
@@ -207,6 +215,24 @@ class QuestSightingCollector:
         text = (text or "").strip()
         if not npc or not text:
             return
+
+        # ⚠ DENY BY DEFAULT — this is the transmission boundary.
+        #
+        # `<Name> says, '...'` is identical for a player and an NPC, and `npc` is
+        # written to the queue VERBATIM below. Without this gate an ordinary
+        # grouping exchange leaks: another player speaks, you /say something, they
+        # speak again inside CONVERSATION_GAP_SECONDS — `_awaiting_reply` is still
+        # set, categorise() returns 'quest_step', and their name and whole message
+        # are queued for upload. Reproduced against this class on 2026-08-04.
+        #
+        # A speaker ships only with positive NPC evidence: an article prefix
+        # ("a rock golem"), a prior `You say, 'Hail, X'`, or a slain-mob sighting.
+        # 🛑 /consider is NOT evidence — you can consider anyone; Blend, Helga and
+        # Funia are all guildmates who show "regards you". See player_roster.py.
+        if self.roster is not None:
+            if not self.roster.may_publish(npc):
+                self.dropped += 1
+                return
 
         # New speaker (or a long gap) starts a fresh conversation.
         if npc.lower() != (self._npc or "").lower() or (ts - self._last_ts) > CONVERSATION_GAP_SECONDS:

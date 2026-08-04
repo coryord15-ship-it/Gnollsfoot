@@ -29,6 +29,8 @@ from typing import Callable, Optional
 from watchdog.events import FileCreatedEvent, FileModifiedEvent, FileSystemEventHandler
 from watchdog.observers import Observer
 
+from app.player_roster import PlayerRoster
+
 from app.parsers.loot_parser import LootParser, LootEvent as LootEvt
 from app.parsers.npc_parser import NPCParser, DialogueEvent
 from app.parsers.game_events import GameEventParser, TurnInEvent
@@ -86,6 +88,12 @@ class LogWatcher:
         self._last_loc: Optional[dict] = None
         self._current_zone = None
         self._current_difficulty = None
+
+        # Who is a player vs an NPC. Nothing in "X says, '...'" distinguishes
+        # `Helga says, 'yeah'` from `Doug says, 'Hail and well met.'`, so the
+        # roster learns players from channels NPCs cannot use (guild/group/tell/
+        # shout/OOC) and gates the dialogue callbacks below. See player_roster.py.
+        self.roster = PlayerRoster()
 
         # Callbacks — registered by other modules
         self._on_loot: list[Callable[[LootEvt], None]] = []
@@ -321,6 +329,15 @@ class LogWatcher:
         if not self._ts_pattern.match(line):
             return
 
+        # Learn who is a player before anything can act on a speaker name. Channel
+        # lines (guild/group/tell/shout/OOC) are proof of a player; Hail targets and
+        # slain mobs are proof of an NPC. Cheap — a handful of anchored regexes, and
+        # it returns early on the first match.
+        try:
+            self.roster.observe(line)
+        except Exception:
+            log.debug("roster.observe failed", exc_info=True)
+
         # A pending offer is waiting to learn whether the NPC took it, and the answer is
         # usually a DIALOGUE line ("<NPC> says, 'I have no need for this…'"). This must run
         # BEFORE the per-parser returns below, or the dialogue branch consumes the verdict
@@ -399,6 +416,19 @@ class LogWatcher:
         # the regex was wrong: two bugs stacked. Require a real speaker. (2026-07-30)
         dialogue = self._npc_parser.parse_dialogue(line)
         if dialogue and getattr(dialogue, "npc_name", "").strip():
+            # ⚠ PRIVACY GATE. `<Name> says, '...'` is the SAME shape for a player
+            # and an NPC, and the speaker is stored verbatim downstream — the
+            # quest-sighting collector strips only the LOCAL user's names from the
+            # text. So another player's chat could reach the server intact.
+            # Verified 2026-08-04 by driving the real collector: player speaks →
+            # you /say → they speak again inside the conversation gap → queued.
+            # Drop anything we can PROVE is a player (roster hit, or a truncation
+            # of one — `ntis` is `Dragantis`). Publishing has a stricter,
+            # deny-by-default check of its own; this one only removes what is
+            # certain, so quest matching keeps working. See player_roster.py.
+            if self.roster.is_player(dialogue.npc_name):
+                self.roster.dropped_players += 1
+                return
             for fn in self._on_dialogue:
                 try: fn(dialogue)
                 except Exception: log.exception("on_dialogue callback error")

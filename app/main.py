@@ -634,7 +634,17 @@ def _start_quest_sightings(app: AppState):
         [qs.player_from_log_path(app.log_watcher.log_path or "")]
     player = players                       # collector accepts a list of names
     known, wanted = qsync.load_manifest(manifest_cache)
-    collector = qs.QuestSightingCollector(queue_path, player=player, known=known)
+    # Share the watcher's roster so the collector inherits everything it has learned
+    # about who is a player. The watcher drops PROVEN players; the collector is
+    # stricter and requires positive NPC evidence before anything is uploaded.
+    _roster = getattr(app.log_watcher, "roster", None)
+    if _roster is not None:
+        try:
+            _roster.add_local_characters(_log_dir)
+        except Exception:
+            log.debug("could not seed roster from log dir", exc_info=True)
+    collector = qs.QuestSightingCollector(queue_path, player=player, known=known,
+                                          roster=_roster)
     collector.wanted = wanted
     app.quest_sightings = collector
 
