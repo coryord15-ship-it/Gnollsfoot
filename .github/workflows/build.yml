@@ -69,6 +69,21 @@ jobs:
         run: |
           & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" /DAppVersion=${{ steps.ver.outputs.version }} /Q installer\GnollGuard.iss
 
+      # A zipped copy of the installer, for users whose ISP or antivirus blocks
+      # .exe downloads outright (Comcast/Xfinity web protection was reported on
+      # 2026-08-04). Those filters generally pass .zip untouched. The real fix is
+      # code signing; this is the free workaround until that happens.
+      #
+      # The site links to it as GnollGuard-Setup-<version>.zip via
+      # /api/download?format=zip, which reads the version from public/version.json.
+      # If this step is ever removed, that link 404s — so it must be built for
+      # EVERY release, not added by hand after the fact.
+      - name: Zip the installer (blocked-download fallback)
+        run: |
+          Compress-Archive -Path installer\Output\GnollGuard-Setup.exe `
+                           -DestinationPath "installer\Output\GnollGuard-Setup-${{ steps.ver.outputs.version }}.zip" `
+                           -CompressionLevel Optimal
+
       # NOTE: no upload-artifact step — the two build outputs are published to the
       # GitHub Release below (unlimited storage), so a separate Actions artifact would
       # just duplicate them and eat the 0.5 GB Actions-storage quota. Re-add with a
@@ -82,6 +97,7 @@ jobs:
           files: |
             dist/GnollGuard.exe
             installer/Output/GnollGuard-Setup.exe
+            installer/Output/GnollGuard-Setup-${{ steps.ver.outputs.version }}.zip
           body: |
             ## Gnoll Guard v${{ steps.ver.outputs.version }}
 
