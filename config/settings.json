@@ -22,9 +22,11 @@
     "npc_dialogue": "(?P<npc>[\\w ]+) says(?:, '| ')(?P<text>.+?)'?$",
     "zone_line": "You have entered (?P<zone>.+?)(?: (?P<diff>\\d+) \\((?P<difflabel>[^)]+)\\))?\\.",
     "zone_status": "You are currently in: (?P<zone>.+?)(?: (?P<diff>\\d+) \\((?P<difflabel>[^)]+)\\))?$",
-    "quest_turn_in": "You (?:have given|give)(?: your)? (?P<item>.+?) to (?P<npc>.+?)[.!]",
+    "quest_turn_in": "You offered \\d+ (?P<item>.+?) to (?P<npc>.+?)\\.\\s*$",
     "auto_sold": "You looted (?:a |an |(?P<qty>\\d+) )?(?P<item>.+?) from (?:a |an )?(?P<npc>.+?)'s corpse and sold it for (?P<price>.+?)\\.",
-    "kill_line": "You have slain (?P<mob>.+?)!"
+    "kill_line": "You have slain (?P<mob>.+?)!",
+    "tradeskill_success": "You have fashioned the items together to create (?:something new:\\s*)?(?:an? )?(?P<item>.+?)\\.\\s*$",
+    "tradeskill_failure": "You lacked the skills to fashion (?:an? )?(?P<item>.+?)\\.\\s*$"
   },
   "scrape_sources": [],
   "window": {
