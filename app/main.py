@@ -455,24 +455,6 @@ class AppState:
         # Current zone — used to update the overlay's "Quests in Zone".
         self._current_zone = None
 
-    def _archive_dir_for_logs(self) -> str:
-        """Returns "" — archives are RENAMED IN PLACE, in the EQ Logs folder.
-
-        Owner's call, 2026-08-08, after asking the right question: "im worried
-        people are gonna look for their logs and not know where they are". Every
-        design that MOVES the file has the same flaw — the user has to already know
-        where it went. A renamed file in the folder they are already looking at does
-        not. So rotate_to() gets an empty archive_dir and renames beside the original:
-
-            eqlog_Morbid_freeport.txt
-            eqlog_Morbid_freeport_2026-07-11_to_2026-08-07.bak
-
-        Kept as a method (rather than deleted) because LogRotator resolves the
-        archive dir on every rotation, and a future "archive to a chosen folder"
-        setting plugs straight back in here.
-        """
-        return ""
-
         # Quest progress — required-item → quest lookup (rebuilt from the journal),
         # the player's full journaled quests (for completion checks), the set of
         # quest items already looted, and the set of items turned in to an NPC.
@@ -493,6 +475,32 @@ class AppState:
         # UI refs — set after UI is built
         self.main_window: MainWindow = None
         self.overlay_window = None
+
+    # ⚠ KEEP NEW METHODS BELOW __init__, NOT INSIDE IT.
+    # On 2026-08-08 this method was inserted into the MIDDLE of __init__, which
+    # silently truncated the constructor: everything after it — quest_matcher,
+    # quest progress state, the UI refs — became unreachable code inside this
+    # method instead. The file still parsed, `import app.main` still worked, and
+    # all 44 tests still passed. It only surfaced as
+    # "AttributeError: 'AppState' object has no attribute 'quest_matcher'"
+    # from a log-watcher zone callback at runtime.
+    def _archive_dir_for_logs(self) -> str:
+        """Returns "" — archives are RENAMED IN PLACE, in the EQ Logs folder.
+
+        Owner's call, 2026-08-08, after asking the right question: "im worried
+        people are gonna look for their logs and not know where they are". Every
+        design that MOVES the file has the same flaw — the user has to already know
+        where it went. A renamed file in the folder they are already looking at does
+        not. So rotate_to() gets an empty archive_dir and renames beside the original:
+
+            eqlog_Morbid_freeport.txt
+            eqlog_Morbid_freeport_2026-07-11_to_2026-08-07.bak
+
+        Kept as a method (rather than deleted) because LogRotator resolves the
+        archive dir on every rotation, and a future "archive to a chosen folder"
+        setting plugs straight back in here.
+        """
+        return ""
 
     def save_config(self):
         _save_config(self.config)

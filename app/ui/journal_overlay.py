@@ -119,6 +119,7 @@ class QuestBubble(ctk.CTkToplevel):
             pass
 
         self._build_shell()
+        self._add_resize_handles()
         self.render()
         self.after(150, self._surface)
 
@@ -349,15 +350,69 @@ class QuestBubble(ctk.CTkToplevel):
             except Exception:
                 pass
 
-    def _resize_start(self, e):
-        self._resize_off = (e.x_root, e.y_root, self.winfo_width(), self.winfo_height())
+    def _resize_start(self, e, mode="both"):
+        self._resize_off = (e.x_root, e.y_root, self.winfo_width(), self.winfo_height(), mode)
 
-    def _resize_move(self, e):
+    def _resize_move(self, e, mode=None):
         o = self._resize_off
         if not o:
             return
-        sx, sy, sw, sh = o
-        self.geometry(f"{max(240, sw + e.x_root - sx)}x{max(180, sh + e.y_root - sy)}")
+        sx, sy, sw, sh, m = o
+        m = mode or m
+        w = max(240, sw + e.x_root - sx) if m in ("both", "w") else self.winfo_width()
+        h = max(180, sh + e.y_root - sy) if m in ("both", "h") else self.winfo_height()
+        self.geometry(f"{int(w)}x{int(h)}")
+
+    def _add_resize_handles(self):
+        """Real edge + corner grab zones.
+
+        WHY: overrideredirect(True) makes this a frameless HUD, which means Windows
+        gives it NO resize border at all — the whole window is dead to a drag. The
+        only handle was a small "◢ resize" label in the footer, which is easy to
+        miss entirely. Owner, 2026-08-08: "i still can[t] size this popout window
+        its really making me mad."
+
+        These are thin frames placed ON TOP of everything (lift()), one per edge
+        plus a fatter corner, each with the cursor the OS would normally give you.
+        Placed with place() so they float over the packed layout without disturbing
+        it, and re-lifted after every render (render() destroys and rebuilds body
+        children, which can otherwise cover them).
+        """
+        spec = (
+            # (relx, rely, anchor, relwidth, relheight, w, h, cursor, mode)
+            (1.0, 0.0, "ne", None, 1.0, 6, None, "sb_h_double_arrow", "w"),   # right edge
+            (0.0, 1.0, "sw", 1.0, None, None, 6, "sb_v_double_arrow", "h"),   # bottom edge
+            (1.0, 1.0, "se", None, None, 18, 18, "sizing", "both"),           # corner
+        )
+        self._resize_handles = []
+        for relx, rely, anchor, relw, relh, w, h, cursor, mode in spec:
+            f = ctk.CTkFrame(self, fg_color="transparent", corner_radius=0)
+            kw = {"relx": relx, "rely": rely, "anchor": anchor}
+            if relw is not None:
+                kw["relwidth"] = relw
+            if relh is not None:
+                kw["relheight"] = relh
+            if w is not None:
+                kw["width"] = w
+            if h is not None:
+                kw["height"] = h
+            f.place(**kw)
+            try:
+                f.configure(cursor=cursor)
+            except Exception:
+                pass
+            f.bind("<Button-1>", lambda e, m=mode: self._resize_start(e, m))
+            f.bind("<B1-Motion>", lambda e, m=mode: self._resize_move(e, m))
+            self._resize_handles.append(f)
+        self._lift_resize_handles()
+
+    def _lift_resize_handles(self):
+        for f in getattr(self, "_resize_handles", []) or []:
+            try:
+                if f.winfo_exists():
+                    f.lift()
+            except Exception:
+                pass
 
     # ── shell / render ────────────────────────────────────────────────────────
     def _build_shell(self):
@@ -400,10 +455,18 @@ class QuestBubble(ctk.CTkToplevel):
         foot = ctk.CTkFrame(self._inner, fg_color=theme.PANEL_HOVER, height=22, corner_radius=12)
         foot.pack(fill="x", padx=6, pady=(0, 6))
         foot.pack_propagate(False)
-        grip = ctk.CTkLabel(foot, text="◢ resize", font=self._f_sm, text_color=theme.TEXT_MUTED)
+        grip = ctk.CTkLabel(foot, text="◢ drag to resize", font=self._f_sm,
+                            text_color=theme.TEXT_MUTED)
         grip.pack(side="right", padx=8)
-        grip.bind("<Button-1>", self._resize_start)
-        grip.bind("<B1-Motion>", self._resize_move)
+        # Bind the WHOLE footer, not just the label — the label alone was a ~50px
+        # target on a frameless window with no other resize affordance.
+        for w in (grip, foot):
+            w.bind("<Button-1>", lambda e: self._resize_start(e, "both"))
+            w.bind("<B1-Motion>", lambda e: self._resize_move(e, "both"))
+            try:
+                w.configure(cursor="sizing")
+            except Exception:
+                pass
 
     # ── FOCUS MODE (v2) ──────────────────────────────────────────────────────
     # Borrowed from EQ2's "Quest Helper" and Questie's next-objective framing:
@@ -496,6 +559,9 @@ class QuestBubble(ctk.CTkToplevel):
         self.render()
 
     def render(self):
+        # render() tears down and rebuilds the body, which can stack new widgets
+        # over the placed resize handles. Re-lift them once the rebuild settles.
+        self.after_idle(self._lift_resize_handles)
         for w in self._body.winfo_children():
             self._safe(w.destroy)
         q = self._quest or {}
