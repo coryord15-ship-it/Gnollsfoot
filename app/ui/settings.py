@@ -478,6 +478,69 @@ class SettingsTab(ctk.CTkFrame):
             command=lambda v, lbl=scale_val: self._on_font_scale_change(v, lbl),
         ).pack(side="right", padx=theme.PAD, fill="x", expand=True)
 
+        # ── App text size ───────────────────────────────────────────────────
+        # DISTINCT from the "Font size" slider above, which only scales pop-out
+        # quest windows. This one scales the APP. They are separate because
+        # main() calls deactivate_automatic_dpi_awareness() for multi-monitor
+        # stability, which pins CustomTkinter at 1.0 — so on a high-DPI display
+        # the main window never grows. That is why the pop-out was readable
+        # while the app itself was not (owner report, 2026-08-06).
+        self._section(scroll, "App text size")
+        try:
+            _us = float(self._app.config.get("ui_scale", 1.0))
+        except Exception:
+            _us = 1.0
+        us_pct = int(round(max(0.8, min(2.0, _us)) * 100))
+        self._ui_scale_pct_var = ctk.IntVar(value=us_pct)
+        ui_row = ctk.CTkFrame(scroll, fg_color="transparent")
+        ui_row.pack(fill="x", pady=(0, theme.PAD_SM))
+        ui_val = ctk.CTkLabel(
+            ui_row, text=f"{us_pct}%", width=44,
+            font=theme.FONT_BODY, text_color=theme.TEXT_SECONDARY,
+        )
+        ctk.CTkLabel(
+            ui_row, text="App scale", font=theme.FONT_BODY,
+            text_color=theme.TEXT_PRIMARY, anchor="w",
+        ).pack(side="left")
+        ui_val.pack(side="right")
+        ui_slider = ctk.CTkSlider(
+            ui_row, variable=self._ui_scale_pct_var, from_=80, to=200,
+            button_color=theme.GOLD, progress_color=theme.GOLD, fg_color=theme.PANEL,
+            command=lambda v, lbl=ui_val: self._on_ui_scale_preview(v, lbl),
+        )
+        ui_slider.pack(side="right", padx=theme.PAD, fill="x", expand=True)
+        # Apply on RELEASE, not on every tick: set_widget_scaling() re-lays out
+        # every widget including this slider, so live-applying would drag the
+        # handle out from under the cursor.
+        ui_slider.bind("<ButtonRelease-1>", self._on_ui_scale_commit)
+        ctk.CTkLabel(
+            scroll, text="Scales the whole app. Applies when you release the slider.",
+            font=theme.FONT_BODY, text_color=theme.TEXT_SECONDARY, anchor="w",
+        ).pack(anchor="w", pady=(0, theme.PAD))
+
+    def _on_ui_scale_preview(self, value, label=None):
+        """Update the % readout while dragging. Does NOT rescale — see commit."""
+        try:
+            if label is not None:
+                label.configure(text=f"{int(float(value))}%")
+        except Exception:
+            log.debug("ui scale preview failed", exc_info=True)
+
+    def _on_ui_scale_commit(self, _event=None):
+        """Apply and persist the app scale once the slider is released."""
+        try:
+            pct = int(self._ui_scale_pct_var.get())
+            scale = max(0.8, min(2.0, pct / 100.0))
+            ctk.set_widget_scaling(scale)
+            self._app.config["ui_scale"] = round(scale, 2)
+            try:
+                self._app.save_config()
+            except Exception:
+                log.debug("save_config failed after ui_scale", exc_info=True)
+            log.info("ui_scale set to %.2f", scale)
+        except Exception:
+            log.exception("ui scale change failed")
+
     def _on_font_family_change(self, _value=None):
         try:
             self._apply_overlay_typography()

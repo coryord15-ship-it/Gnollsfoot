@@ -1000,6 +1000,21 @@ def main():
 
     app = AppState()
 
+    # App-wide UI scale. deactivate_automatic_dpi_awareness() above pins CustomTkinter
+    # at 1.0 so windows stay put across mixed-DPI monitors — correct for that bug, but it
+    # also means the app does NOT grow on a high-DPI display, and the owner reported it
+    # unreadable on 2026-08-06. The journal overlay already had its own font-scale slider,
+    # which is exactly why the pop-out was legible while the main window was not. This is
+    # the same control for the app itself. Default 1.0 keeps existing installs unchanged.
+    try:
+        _scale = float((app.config or {}).get("ui_scale", 1.0))
+        _scale = max(0.8, min(2.0, _scale))
+        if abs(_scale - 1.0) > 0.001:
+            ctk.set_widget_scaling(_scale)
+            log.info("ui_scale applied: %.2f", _scale)
+    except Exception:
+        log.debug("ui_scale could not be applied", exc_info=True)
+
     # Anonymous headcount + "users online" heartbeat — daemon thread, silent, best-effort.
     # No personal data (random install id only); never blocks startup. See telemetry.py.
     try:
