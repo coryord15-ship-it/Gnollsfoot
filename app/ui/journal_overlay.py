@@ -30,6 +30,23 @@ SNAP_DISTANCE = 28
 # Pull free of a cluster when dragged this far from the snap lock.
 UNSNAP_DISTANCE = 48
 
+# ── frameless edge resize ─────────────────────────────────────────────────────
+# These windows are overrideredirect(True) — a clean HUD with no title bar, but
+# also NO OS resize border, so the window is dead to an edge drag.
+#
+# We hit-test the pointer instead of overlaying grab widgets. An earlier attempt
+# used place()d frames lift()ed to the top; in Tk a placed widget swallows mouse
+# events for anything beneath it, and the header's Dock / ✕ buttons pack(side=
+# "right") sat directly under the right-edge strip — the user could no longer
+# dock or close the window. Hit-testing adds no widgets, so it cannot do that.
+RESIZE_EDGE = 7          # px from the frame that counts as "on the edge"
+RESIZE_CURSORS = {
+    "n": "sb_v_double_arrow",  "s": "sb_v_double_arrow",
+    "e": "sb_h_double_arrow",  "w": "sb_h_double_arrow",
+    "ne": "top_right_corner",  "nw": "top_left_corner",
+    "se": "bottom_right_corner", "sw": "bottom_left_corner",
+}
+
 
 def _asset(*parts) -> str:
     base = getattr(sys, "_MEIPASS", os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -84,6 +101,10 @@ class QuestBubble(ctk.CTkToplevel):
         self._dragging = False
         self._drag_off = None
         self._resize_off = None
+        # Edge-resize drag state. NOT named _resize_start — that is already a
+        # METHOD on this class (the footer grip binds to it), and assigning an
+        # attribute of the same name would shadow it and break the grip.
+        self._rz = None
 
         f_sub, f_body, f_sm = _fonts(app_state)
         self._f_sub, self._f_body, self._f_sm = f_sub, f_body, f_sm
@@ -119,7 +140,7 @@ class QuestBubble(ctk.CTkToplevel):
             pass
 
         self._build_shell()
-        self._add_resize_handles()
+        self._bind_edge_resize()
         self.render()
         self.after(150, self._surface)
 
@@ -350,69 +371,124 @@ class QuestBubble(ctk.CTkToplevel):
             except Exception:
                 pass
 
-    def _resize_start(self, e, mode="both"):
-        self._resize_off = (e.x_root, e.y_root, self.winfo_width(), self.winfo_height(), mode)
+    # ── frameless edge resize (hit-test, no overlay widgets) ─────────────────
+    def _edge_mode(self, event):
+        """Which edge/corner the pointer is on, or None. Coords are window-relative."""
+        try:
+            x = event.x_root - self.winfo_rootx()
+            y = event.y_root - self.winfo_rooty()
+            w, h = self.winfo_width(), self.winfo_height()
+        except Exception:
+            return None
+        if w <= 1 or h <= 1:
+            return None
+        # >= on the far side, not > — otherwise the right/bottom bands come out one
+        # pixel narrower than left/top, and the edge you grab most (bottom-right)
+        # is the hardest to hit. Caught by test_edge_band_is_exactly_RESIZE_EDGE_wide.
+        left, right = x < RESIZE_EDGE, x >= w - RESIZE_EDGE
+        top, bottom = y < RESIZE_EDGE, y >= h - RESIZE_EDGE
+        if top and left:
+            return "nw"
+        if top and right:
+            return "ne"
+        if bottom and left:
+            return "sw"
+        if bottom and right:
+            return "se"
+        if left:
+            return "w"
+        if right:
+            return "e"
+        if top:
+            return "n"
+        if bottom:
+            return "s"
+        return None
 
-    def _resize_move(self, e, mode=None):
+    def _edge_hint(self, on: bool):
+        """Hairline highlight, drawn with ZERO extra widgets.
+
+        `_shell` is packed with padx/pady=2, so the toplevel's own background
+        already shows as a 2px frame around the whole window. Recolouring it gives
+        the "invisible until you approach an edge" hint for free.
+
+        ⚠ Do NOT do this with place()d strips instead. `fg_color="transparent"` is
+        a PAINT setting in Tk, not hit-testing — a placed frame still eats mouse
+        events, and a full-height strip on the right sits on top of the Dock and ✕
+        buttons. That is exactly how this got broken once already.
+        """
+        self._safe(lambda: self.configure(fg_color=theme.GOLD if on else theme.BG))
+
+    def _on_edge_motion(self, event):
+        if self._rz:                       # mid-drag, leave the cursor alone
+            return
+        mode = self._edge_mode(event)
+        self._safe(lambda: self.configure(cursor=RESIZE_CURSORS.get(mode, "") if mode else ""))
+        self._edge_hint(bool(mode))
+
+    def _on_edge_press(self, event):
+        mode = self._edge_mode(event)
+        if not mode:
+            return None
+        self._rz = (mode, event.x_root, event.y_root,
+                    self.winfo_width(), self.winfo_height(),
+                    self.winfo_x(), self.winfo_y())
+        return "break"                      # don't also start a header drag
+
+    def _on_edge_drag(self, event):
+        if not self._rz:
+            return
+        mode, sx, sy, sw, sh, ox, oy = self._rz
+        dx, dy = event.x_root - sx, event.y_root - sy
+        nw, nh, nx, ny = sw, sh, ox, oy
+        if "e" in mode:
+            nw = max(240, sw + dx)
+        if "w" in mode:
+            nw = max(240, sw - dx)
+            nx = ox + (sw - nw)             # dragging the left edge moves the origin
+        if "s" in mode:
+            nh = max(180, sh + dy)
+        if "n" in mode:
+            nh = max(180, sh - dy)
+            ny = oy + (sh - nh)
+        self._safe(lambda: self.geometry(f"{int(nw)}x{int(nh)}+{int(nx)}+{int(ny)}"))
+
+    def _on_edge_release(self, _event=None):
+        self._rz = None
+        self._safe(lambda: self.configure(cursor=""))
+        self._edge_hint(False)
+
+    def _bind_edge_resize(self):
+        """Bind on the toplevel AND the two outer frames — never bind_all().
+
+        Tk delivers Motion to the widget UNDER the pointer, and the toplevel's own
+        background is only the 2px gap around `_shell`. So the toplevel alone would
+        almost never see the event. `_shell` (padx/pady 2) and `_inner` (another 2)
+        own the outer ~8px, and hdr/body/foot are inset 6-8px further, so with
+        RESIZE_EDGE=7 the hit zone lands on exactly these three and never on a
+        button.
+
+        ⚠ bind_all() would bind every window in the app — with five bubbles open
+        they would fight each other and the main window. Do not use it here.
+        """
+        for w in (self, self._shell, self._inner):
+            if w is None:
+                continue
+            w.bind("<Motion>", self._on_edge_motion, add="+")
+            w.bind("<Button-1>", self._on_edge_press, add="+")
+            w.bind("<B1-Motion>", self._on_edge_drag, add="+")
+            w.bind("<ButtonRelease-1>", self._on_edge_release, add="+")
+            w.bind("<Leave>", lambda e: self._on_edge_motion(e), add="+")
+
+    def _resize_start(self, e):
+        self._resize_off = (e.x_root, e.y_root, self.winfo_width(), self.winfo_height())
+
+    def _resize_move(self, e):
         o = self._resize_off
         if not o:
             return
-        sx, sy, sw, sh, m = o
-        m = mode or m
-        w = max(240, sw + e.x_root - sx) if m in ("both", "w") else self.winfo_width()
-        h = max(180, sh + e.y_root - sy) if m in ("both", "h") else self.winfo_height()
-        self.geometry(f"{int(w)}x{int(h)}")
-
-    def _add_resize_handles(self):
-        """Real edge + corner grab zones.
-
-        WHY: overrideredirect(True) makes this a frameless HUD, which means Windows
-        gives it NO resize border at all — the whole window is dead to a drag. The
-        only handle was a small "◢ resize" label in the footer, which is easy to
-        miss entirely. Owner, 2026-08-08: "i still can[t] size this popout window
-        its really making me mad."
-
-        These are thin frames placed ON TOP of everything (lift()), one per edge
-        plus a fatter corner, each with the cursor the OS would normally give you.
-        Placed with place() so they float over the packed layout without disturbing
-        it, and re-lifted after every render (render() destroys and rebuilds body
-        children, which can otherwise cover them).
-        """
-        spec = (
-            # (relx, rely, anchor, relwidth, relheight, w, h, cursor, mode)
-            (1.0, 0.0, "ne", None, 1.0, 6, None, "sb_h_double_arrow", "w"),   # right edge
-            (0.0, 1.0, "sw", 1.0, None, None, 6, "sb_v_double_arrow", "h"),   # bottom edge
-            (1.0, 1.0, "se", None, None, 18, 18, "sizing", "both"),           # corner
-        )
-        self._resize_handles = []
-        for relx, rely, anchor, relw, relh, w, h, cursor, mode in spec:
-            f = ctk.CTkFrame(self, fg_color="transparent", corner_radius=0)
-            kw = {"relx": relx, "rely": rely, "anchor": anchor}
-            if relw is not None:
-                kw["relwidth"] = relw
-            if relh is not None:
-                kw["relheight"] = relh
-            if w is not None:
-                kw["width"] = w
-            if h is not None:
-                kw["height"] = h
-            f.place(**kw)
-            try:
-                f.configure(cursor=cursor)
-            except Exception:
-                pass
-            f.bind("<Button-1>", lambda e, m=mode: self._resize_start(e, m))
-            f.bind("<B1-Motion>", lambda e, m=mode: self._resize_move(e, m))
-            self._resize_handles.append(f)
-        self._lift_resize_handles()
-
-    def _lift_resize_handles(self):
-        for f in getattr(self, "_resize_handles", []) or []:
-            try:
-                if f.winfo_exists():
-                    f.lift()
-            except Exception:
-                pass
+        sx, sy, sw, sh = o
+        self.geometry(f"{max(240, sw + e.x_root - sx)}x{max(180, sh + e.y_root - sy)}")
 
     # ── shell / render ────────────────────────────────────────────────────────
     def _build_shell(self):
@@ -435,14 +511,6 @@ class QuestBubble(ctk.CTkToplevel):
             hover_color=theme.GOLD, text_color=theme.TEXT_PRIMARY, font=self._f_sm,
             corner_radius=10, command=self._dock,
         ).pack(side="right", padx=(0, 4))
-        # v2: focus toggle — ☰ full step list  /  ◧ next step only (EQ2 Quest Helper style)
-        self._focus_btn = ctk.CTkButton(
-            hdr, text="◧" if getattr(self, "_focus_mode", False) else "☰",
-            width=28, height=24, fg_color=theme.PANEL, hover_color=theme.GOLD,
-            text_color=theme.TEXT_PRIMARY, font=self._f_sm, corner_radius=10,
-            command=self._toggle_focus,
-        )
-        self._focus_btn.pack(side="right", padx=(0, 4))
         ctk.CTkButton(
             hdr, text="✕", width=26, height=24, fg_color="transparent",
             text_color=theme.TEXT_MUTED, hover_color=theme.DANGER, font=self._f_sm,
@@ -455,113 +523,12 @@ class QuestBubble(ctk.CTkToplevel):
         foot = ctk.CTkFrame(self._inner, fg_color=theme.PANEL_HOVER, height=22, corner_radius=12)
         foot.pack(fill="x", padx=6, pady=(0, 6))
         foot.pack_propagate(False)
-        grip = ctk.CTkLabel(foot, text="◢ drag to resize", font=self._f_sm,
-                            text_color=theme.TEXT_MUTED)
+        grip = ctk.CTkLabel(foot, text="◢ resize", font=self._f_sm, text_color=theme.TEXT_MUTED)
         grip.pack(side="right", padx=8)
-        # Bind the WHOLE footer, not just the label — the label alone was a ~50px
-        # target on a frameless window with no other resize affordance.
-        for w in (grip, foot):
-            w.bind("<Button-1>", lambda e: self._resize_start(e, "both"))
-            w.bind("<B1-Motion>", lambda e: self._resize_move(e, "both"))
-            try:
-                w.configure(cursor="sizing")
-            except Exception:
-                pass
-
-    # ── FOCUS MODE (v2) ──────────────────────────────────────────────────────
-    # Borrowed from EQ2's "Quest Helper" and Questie's next-objective framing:
-    # while you are actually playing you do not want a wall of steps, you want
-    # ONE line telling you what to do next. Toggle with the ◧ button in the header.
-    def _next_step(self, q):
-        """First not-yet-done step, or None if the quest is finished."""
-        matcher = getattr(self._app, "quest_matcher", None)
-        steps = sorted(q.get("steps") or [], key=lambda x: x.get("step_order", 0))
-        for s in steps:
-            num = s.get("step_order", "")
-            done = bool(matcher and s.get("action_type")
-                        and matcher.is_step_done(q.get("id"), num))
-            if not done:
-                return s
-        return None
-
-    def _render_focus(self, q, wrap):
-        """One big 'do this next' line + its items + a /waypoint button."""
-        step = self._next_step(q)
-        if step is None:
-            ctk.CTkLabel(
-                self._body, text="✓  All steps complete",
-                font=self._f_body, text_color=theme.GREEN, anchor="w",
-            ).pack(anchor="w", pady=(6, 2))
-            if q.get("reward_items"):
-                ctk.CTkLabel(
-                    self._body, text="Reward: " + ", ".join(q["reward_items"]),
-                    font=self._f_sm, text_color=theme.GOLD, anchor="w",
-                    wraplength=wrap, justify="left",
-                ).pack(anchor="w", pady=(4, 0))
-            return
-
-        steps = q.get("steps") or []
-        num = step.get("step_order", "")
-        ctk.CTkLabel(
-            self._body, text=f"NEXT  ·  step {num} of {len(steps)}",
-            font=self._f_sm, text_color=theme.TEXT_SECONDARY, anchor="w",
-        ).pack(anchor="w", pady=(2, 2))
-        ctk.CTkLabel(
-            self._body, text=step.get("instruction") or "(no instruction recorded)",
-            font=self._f_body, text_color=theme.TEXT_PRIMARY, anchor="w",
-            justify="left", wraplength=wrap,
-        ).pack(anchor="w", pady=(0, 4))
-
-        prog = getattr(self._app, "_quest_progress", set())
-        given = getattr(self._app, "_quest_given", set())
-        for it in (step.get("required_items") or []):
-            low = it.lower()
-            if low in given:
-                mark, col = "✔", theme.GREEN
-            elif low in prog:
-                mark, col = "✓", theme.GOLD
-            else:
-                mark, col = "○", theme.TEXT_SECONDARY
-            ctk.CTkLabel(self._body, text=f"   {mark} {it}", font=self._f_sm,
-                         text_color=col, anchor="w").pack(anchor="w")
-
-        # Waypoint: the logic already exists (quest_matcher.waypoint_command) and is
-        # wired into journal_view + the site, but was MISSING from the overlay — the
-        # one surface you actually look at mid-play.
-        wp = None
-        try:
-            from app import quest_matcher as _qm
-            # step_waypoint_command() checks loc_override too — the old code only
-            # looked at `entities`, so steps with a hand-authored loc had no button.
-            wp = _qm.step_waypoint_command(step)
-        except Exception:
-            wp = None
-        if wp:
-            ctk.CTkButton(
-                self._body, text="📍 Copy /waypoint", width=150, height=24,
-                font=self._f_sm, fg_color=theme.PANEL, text_color=theme.TEXT_SECONDARY,
-                command=lambda cmd=wp: self._copy_text(cmd),
-            ).pack(anchor="w", pady=(6, 0))
-
-    def _copy_text(self, text):
-        try:
-            self.clipboard_clear()
-            self.clipboard_append(text)
-        except Exception:
-            pass
-
-    def _toggle_focus(self):
-        self._focus_mode = not getattr(self, "_focus_mode", False)
-        try:
-            self._focus_btn.configure(text="◧" if self._focus_mode else "☰")
-        except Exception:
-            pass
-        self.render()
+        grip.bind("<Button-1>", self._resize_start)
+        grip.bind("<B1-Motion>", self._resize_move)
 
     def render(self):
-        # render() tears down and rebuilds the body, which can stack new widgets
-        # over the placed resize handles. Re-lift them once the rebuild settles.
-        self.after_idle(self._lift_resize_handles)
         for w in self._body.winfo_children():
             self._safe(w.destroy)
         q = self._quest or {}
@@ -587,14 +554,9 @@ class QuestBubble(ctk.CTkToplevel):
                 ).pack(anchor="w", pady=(0, 6))
             except Exception:
                 pass
-        wrap = max(180, self.winfo_width() - 48)
-        # v2: focus mode short-circuits the full step list.
-        if getattr(self, "_focus_mode", False):
-            self._render_focus(q, wrap)
-            return
-
         prog = getattr(self._app, "_quest_progress", set())
         given = getattr(self._app, "_quest_given", set())
+        wrap = max(180, self.winfo_width() - 48)
         for s in sorted(q.get("steps") or [], key=lambda x: x.get("step_order", 0)):
             num = s.get("step_order", "")
             is_done = bool(
