@@ -71,12 +71,22 @@ import time
 
 log = logging.getLogger(__name__)
 
-# TODO(owner): CONFIRM IN-GAME before trusting the Copy /waypoint button — neither
-# Grok nor Gemini nor Claude could verify the real `/loc` label or `/waypoint`
-# argument order from the log alone. Run `/loc` in-game, compare the printed
-# label order to this constant, and flip it if wrong. See QUEST_STEPS_PLAN.md
-# "The one blocker to clear before coding".
+# ✅ CONFIRMED IN-GAME 2026-08-07 — this was the long-standing blocker that no model
+# could settle from the log alone. The owner pasted `/waypoint 29, -178, -24` into
+# EverQuest Legends and it placed the waypoint correctly ("that worked great").
+#
+# Two facts fell out of that, and BOTH matter:
+#   1. ORDER — the arguments are in the same order `/loc` PRINTS them. Note that EQ's
+#      /loc prints "Y, X, Z", so the first argument is really Y. We keep the constant
+#      as "x y z" because `entities.loc_x` stores that FIRST printed number; the column
+#      is misnamed, not the order. All 14 rows were made consistent on 2026-08-07.
+#      ⚠ Do not "fix" the column names without migrating the DB and shipping a client
+#      in lockstep — released builds read loc_x first. See board item
+#      `entities-locxy-naming-migration`.
+#   2. SEPARATOR — commas. The confirmed-working paste was comma-separated; space
+#      separation has never been verified in-game, so do not switch back to it.
 WAYPOINT_AXIS_ORDER = "x y z"
+WAYPOINT_SEPARATOR = ", "
 
 STATE_VERSION = 1
 CONVERSATION_STALE_SECONDS = 300  # ~5 min backstop; the real close is a hail/zone.
@@ -118,16 +128,69 @@ def _norm(s) -> str:
     return (s or "").strip().lower()
 
 
+def _coords_from(src) -> dict | None:
+    """Pull an {x,y,z} dict out of whatever shape a loc is stored in.
+
+    `entities` rows use loc_x/loc_y/loc_z columns, but `quest_steps.loc_override`
+    is free-form jsonb authored by hand, so accept the shapes people actually
+    write: a dict, a 3-element list, or the raw "a, b, c" string copied out of a
+    /loc line. Anything else returns None rather than guessing.
+    """
+    if not src:
+        return None
+    if isinstance(src, dict):
+        # entities columns first, then a bare {"x":..,"y":..,"z":..} override
+        got = {a: src.get(f"loc_{a}", src.get(a)) for a in ("x", "y", "z")}
+        if all(got[a] is not None for a in ("x", "y", "z")):
+            return got
+        # {"loc_raw": "a, b, c"} / {"raw": "..."}
+        return _coords_from(src.get("loc_raw") or src.get("raw"))
+    if isinstance(src, (list, tuple)) and len(src) == 3:
+        return dict(zip(("x", "y", "z"), src))
+    if isinstance(src, str):
+        parts = [p.strip() for p in src.replace(";", ",").split(",")]
+        if len(parts) == 3:
+            try:
+                return dict(zip(("x", "y", "z"), (float(p) for p in parts)))
+            except ValueError:
+                return None
+    return None
+
+
 def waypoint_command(entity: dict | None, axis_order: str = WAYPOINT_AXIS_ORDER) -> str | None:
-    """Build a `/waypoint x y z` string from a tagged entity's loc, in whatever
-    axis order the owner confirms in-game. None if the entity has no loc yet."""
-    if not entity:
+    """Build a pasteable `/waypoint` string from a tagged entity's loc.
+
+    Order and separator are both CONFIRMED IN-GAME — see WAYPOINT_AXIS_ORDER.
+    None if there is no usable loc, so callers can hide the button.
+    """
+    coords = _coords_from(entity)
+    if not coords:
         return None
-    coords = {"x": entity.get("loc_x"), "y": entity.get("loc_y"), "z": entity.get("loc_z")}
-    if any(coords[a] is None for a in ("x", "y", "z")):
+    ordered = [_fmt_coord(coords[a]) for a in axis_order.split()]
+    return "/waypoint " + WAYPOINT_SEPARATOR.join(ordered)
+
+
+def _fmt_coord(v) -> str:
+    """Trim the pointless trailing zeros so the pasted line reads like a /loc."""
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return str(v)
+    return str(int(f)) if f == int(f) else f"{f:g}"
+
+
+def step_waypoint_command(step: dict | None) -> str | None:
+    """The waypoint for a whole STEP — the thing the journal should call.
+
+    Prefers the step's own `loc_override` (hand-authored, so it wins) and falls
+    back to the joined `entities` row. This is the fix for "all quests that have
+    a loc": the old code only ever looked at `entities`, so any step carrying a
+    loc_override silently had no button.
+    """
+    if not step:
         return None
-    ordered = [str(coords[a]) for a in axis_order.split()]
-    return "/waypoint " + " ".join(ordered)
+    return (waypoint_command(_coords_from(step.get("loc_override")))
+            or waypoint_command(step.get("entities")))
 
 
 class ConversationState:

@@ -465,12 +465,12 @@ class QuestBubble(ctk.CTkToplevel):
         # Waypoint: the logic already exists (quest_matcher.waypoint_command) and is
         # wired into journal_view + the site, but was MISSING from the overlay — the
         # one surface you actually look at mid-play.
-        entity = step.get("entities")
         wp = None
         try:
-            if entity:
-                from app import quest_matcher as _qm
-                wp = _qm.waypoint_command(entity)
+            from app import quest_matcher as _qm
+            # step_waypoint_command() checks loc_override too — the old code only
+            # looked at `entities`, so steps with a hand-authored loc had no button.
+            wp = _qm.step_waypoint_command(step)
         except Exception:
             wp = None
         if wp:

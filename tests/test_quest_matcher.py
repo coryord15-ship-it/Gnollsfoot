@@ -311,8 +311,44 @@ def test_waypoint_command_none_without_loc():
 
 def test_waypoint_command_uses_axis_order():
     entity = {"loc_x": 1, "loc_y": 2, "loc_z": 3}
-    assert qm.waypoint_command(entity, "x y z") == "/waypoint 1 2 3"
-    assert qm.waypoint_command(entity, "y x z") == "/waypoint 2 1 3"
+    assert qm.waypoint_command(entity, "x y z") == "/waypoint 1, 2, 3"
+    assert qm.waypoint_command(entity, "y x z") == "/waypoint 2, 1, 3"
+
+
+def test_waypoint_command_matches_the_format_confirmed_in_game():
+    """The exact string the owner pasted into EQ on 2026-08-07 and confirmed works.
+
+    Comma-separated, in /loc print order, trailing zeros trimmed. If this test
+    ever needs changing, re-confirm in-game first — this is the only evidence we
+    have that the button produces something the client accepts.
+    """
+    lucan = {"loc_x": 29, "loc_y": -178, "loc_z": -24.19}
+    assert qm.waypoint_command(lucan) == "/waypoint 29, -178, -24.19"
+
+
+def test_step_waypoint_prefers_loc_override_then_entity():
+    entity_only = {"entities": {"loc_x": -176, "loc_y": 90, "loc_z": -161.9}}
+    assert qm.step_waypoint_command(entity_only) == "/waypoint -176, 90, -161.9"
+
+    # a hand-authored override outranks the joined entity
+    both = {"loc_override": {"x": 1, "y": 2, "z": 3},
+            "entities": {"loc_x": 9, "loc_y": 9, "loc_z": 9}}
+    assert qm.step_waypoint_command(both) == "/waypoint 1, 2, 3"
+
+    # overrides get authored in whatever shape is handy — all must work
+    assert qm.step_waypoint_command({"loc_override": [11.5, -22, -33]}) == "/waypoint 11.5, -22, -33"
+    assert qm.step_waypoint_command(
+        {"loc_override": "138.16, -262.13, -19.19"}) == "/waypoint 138.16, -262.13, -19.19"
+    assert qm.step_waypoint_command(
+        {"loc_override": {"loc_raw": "56.76, -304.99, -24.19"}}) == "/waypoint 56.76, -304.99, -24.19"
+
+    # unparseable override must NOT hide a perfectly good entity loc
+    assert qm.step_waypoint_command(
+        {"loc_override": "somewhere near the docks",
+         "entities": {"loc_x": 5, "loc_y": 6, "loc_z": 7}}) == "/waypoint 5, 6, 7"
+
+    assert qm.step_waypoint_command({"instruction": "hail someone"}) is None
+    assert qm.step_waypoint_command(None) is None
 
 
 def test_classify_player_say():

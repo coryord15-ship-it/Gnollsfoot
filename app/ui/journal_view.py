@@ -171,8 +171,8 @@ def render_quest_card(
         if is_structured and (on_toggle_step or on_copy):
             btn_row = ctk.CTkFrame(row, fg_color="transparent")
             btn_row.pack(anchor="w", padx=(4, 4), pady=(2, 6))
-            entity = s.get("entities")
-            wp = quest_matcher.waypoint_command(entity) if entity else None
+            # loc_override wins over the joined entity; see step_waypoint_command().
+            wp = quest_matcher.step_waypoint_command(s)
             if wp and on_copy:
                 ctk.CTkButton(
                     btn_row, text="📍 Copy /waypoint", width=140, height=22,
