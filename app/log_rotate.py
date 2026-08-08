@@ -35,10 +35,22 @@ def eq_running(exe: str = "eqgame.exe") -> bool:
 
 
 class LogRotator:
-    def __init__(self, get_log_path: Callable[[], Optional[str]], archive_dir: str,
-                 rotate_fn: Callable[[str], Optional[str]],
+    def __init__(self, get_log_path: Callable[[], Optional[str]],
+                 archive_dir, rotate_fn: Callable[[str], Optional[str]],
                  threshold_mb: int = 50, check_every_s: int = 300,
                  enabled: bool = True, eq_exe: str = "eqgame.exe"):
+        """archive_dir may be a plain path OR a callable returning one.
+
+        It became a callable on 2026-08-08. Rotation used to archive into
+        ~/Documents/GnollGuard/logs_archive — a fixed path far away from the game
+        folder the files came from. Owner: "lets be careful about moving them all
+        the way out of the eq log folder we should make another folder in the log
+        folder called old or backup and move them there."
+
+        A callable matters because the watched Logs folder can change at any time
+        from Settings; a path captured once at construction would keep archiving
+        into the OLD game folder after the user repointed the app.
+        """
         self._get_log_path = get_log_path
         self._archive_dir = archive_dir
         self._rotate_fn = rotate_fn
@@ -92,10 +104,26 @@ class LogRotator:
             log.info("log is %.0f MB but EQ is running; deferring rotation",
                      size / 1024 / 1024)
             return
-        self._rotate_fn(self._archive_dir)
+        self._rotate_fn(self.archive_dir())
+
+    def archive_dir(self) -> str:
+        """Resolve where archives go, right now. Never raises — a broken callable
+        must not be able to stop rotation, so we fall back to the old fixed path."""
+        d = self._archive_dir
+        if callable(d):
+            try:
+                d = d()
+            except Exception:
+                log.debug("archive_dir callable failed; using fallback", exc_info=True)
+                d = None
+        if not d:
+            import os as _os
+            d = _os.path.join(_os.path.expanduser("~"), "Documents",
+                              "GnollGuard", "logs_archive")
+        return str(d)
 
     def rotate_now(self) -> Optional[str]:
         """Manual rotate (e.g. a UI button). Refuses while EQ is running."""
         if eq_running(self._eq_exe):
             return None
-        return self._rotate_fn(self._archive_dir)
+        return self._rotate_fn(self.archive_dir())

@@ -13,6 +13,7 @@ The app reads your EverQuest log to tick off Quest Journal items and silently
 contribute item data to the community database. Verified items sync to Supabase.
 """
 
+import glob
 import json
 import logging
 import os
@@ -21,6 +22,7 @@ import shutil
 import subprocess
 import sys
 import threading
+import time  # used by _obs_pump; missing until 2026-08-08 — see below
 
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _PROJECT_ROOT not in sys.path:
@@ -168,6 +170,138 @@ def _looks_like_live_eq(path: str) -> bool:
     return any(seg.strip() == "everquest" for seg in parts)
 
 
+ARCHIVE_SUBDIR = "old"          # lives INSIDE the EQ Logs folder
+_ARCHIVE_README = """This folder was created by Gnoll Guard.
+
+EverQuest appends to its character logs forever — one of them had reached 54 MB.
+When EverQuest is CLOSED and a log has grown past the size limit, Gnoll Guard
+moves the logs in here and EverQuest starts fresh, empty ones next launch.
+
+  * Nothing is deleted. Files are renamed <original>.<timestamp>.bak
+  * Gnoll Guard never touches a log while EverQuest is running
+  * Safe to delete these yourself once you no longer want the history
+  * Turn it off entirely: Settings, or "log_rotate_enabled": false in config
+
+Before 2026-08-08 these were moved to Documents\\GnollGuard\\logs_archive instead.
+If you are missing older logs, look there.
+"""
+
+
+def _write_archive_readme(archive_dir: str) -> None:
+    """Explain the folder to whoever finds it. Best-effort, never fatal.
+
+    The old behaviour's real sin was silence — files left the game folder with no
+    note anywhere saying what took them or where they went.
+    """
+    try:
+        os.makedirs(archive_dir, exist_ok=True)
+        readme = os.path.join(archive_dir, "README.txt")
+        if not os.path.exists(readme):
+            with open(readme, "w", encoding="utf-8") as fh:
+                fh.write(_ARCHIVE_README)
+    except OSError:
+        pass
+
+
+def _eq_legends_logs_from_registry() -> list[str]:
+    r"""Every EverQuest LEGENDS Logs folder we can find from the Windows registry.
+
+    WHY: auto-detect used to be a single hardcoded path —
+        C:\Users\Public\Daybreak Game Company\Installed Games\EverQuest Legends\Logs
+    so anyone who installed to D:\Games, another drive, or a non-default Daybreak
+    folder fell straight through to the first-run wizard and had to browse for a
+    file the machine already knew about. Owner, 2026-08-08: "we should be able to
+    find their install directory pretty easy right? so why do we have to ask them
+    anything".
+
+    HOW: the installer registers an uninstall entry. On a real machine it looks like
+        DisplayName    = "EverQuest Legends"
+        InstallLocation= ""                      <- often EMPTY, do not rely on it
+        DisplayIcon    = "<install dir>\Everquest.ico"
+    so the install directory is the icon's folder. Verified 2026-08-08.
+
+    ⚠ LEGENDS ONLY. The same scan also turns up plain "EverQuest" (live). Their logs
+    are format-identical, and attaching to a live-EQ log would feed live-EQ dialogue
+    into the Legends database — the exact cross-game hole closed on 2026-07-20. So we
+    match the name EXACTLY and let _looks_like_live_eq() backstop us.
+    """
+    if os.name != "nt":
+        return []
+    found: list[str] = []
+    try:
+        import winreg
+    except Exception:
+        return []
+    roots = [
+        (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall"),
+        (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall"),
+        (winreg.HKEY_CURRENT_USER, r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall"),
+    ]
+    for hive, subkey in roots:
+        try:
+            key = winreg.OpenKey(hive, subkey)
+        except OSError:
+            continue
+        try:
+            for i in range(winreg.QueryInfoKey(key)[0]):
+                try:
+                    sub = winreg.OpenKey(key, winreg.EnumKey(key, i))
+                except OSError:
+                    continue
+                try:
+                    def _val(name):
+                        try:
+                            return str(winreg.QueryValueEx(sub, name)[0] or "")
+                        except OSError:
+                            return ""
+                    # Exact match only — "EverQuest" alone is LIVE EQ and must not match.
+                    if _val("DisplayName").strip().casefold() != "everquest legends":
+                        continue
+                    base = _val("InstallLocation").strip().strip('"')
+                    if not base:
+                        icon = _val("DisplayIcon").strip().strip('"').split(",")[0]
+                        if icon:
+                            base = os.path.dirname(icon)
+                    if base:
+                        logs = os.path.join(base, "Logs")
+                        if os.path.isdir(logs) and logs not in found:
+                            found.append(logs)
+                finally:
+                    sub.Close()
+        finally:
+            key.Close()
+    return found
+
+
+def _eq_legends_logs_from_running_game() -> list[str]:
+    """Logs folder inferred from a running eqgame.exe, if we can see its path.
+
+    Costs nothing and is the most authoritative source there is: the player is
+    literally playing the install we want. Best-effort — psutil may be absent and
+    reading another process's path can be denied, so every failure is silent.
+    """
+    if os.name != "nt":
+        return []
+    try:
+        import psutil  # optional dependency; absent in some builds
+    except Exception:
+        return []
+    out: list[str] = []
+    try:
+        for p in psutil.process_iter(["name", "exe"]):
+            if (p.info.get("name") or "").lower() != "eqgame.exe":
+                continue
+            exe = p.info.get("exe") or ""
+            if not exe:
+                continue
+            logs = os.path.join(os.path.dirname(exe), "Logs")
+            if os.path.isdir(logs) and logs not in out:
+                out.append(logs)
+    except Exception:
+        return out
+    return out
+
+
 def _migrate_config(config: dict) -> dict:
     """
     Ensure user's persisted config has the latest log_patterns.
@@ -291,10 +425,23 @@ class AppState:
         # Log watcher
         self.log_watcher = LogWatcher(self.config)
 
-        # Smart log rotation — archives the main log when EQ is closed + oversized
+        # Smart log rotation — archives the main log when EQ is closed + oversized.
+        #
+        # ARCHIVES LIVE INSIDE THE EQ LOGS FOLDER (changed 2026-08-08).
+        # They used to go to ~/Documents/GnollGuard/logs_archive, which meant the app
+        # silently moved 12 files out of the user's game folder to a location nothing
+        # in the game folder pointed at. Owner asked for them to stay put: "lets be
+        # careful about moving them all the way out of the eq log folder we should make
+        # another folder in the log folder called old or backup and move them there."
+        #
+        # SAFE because LogWatcher._matching_files() globs NON-recursively
+        # (glob(os.path.join(dir, "eqlog_*.txt"))), so a subfolder is invisible to it —
+        # and archives are renamed to ".bak" anyway, which the glob would not match.
+        # If that glob is ever made recursive, this subfolder MUST be excluded or the
+        # app will re-ingest its own archives and double-count every event.
         self.log_rotator = LogRotator(
             get_log_path=lambda: self.log_watcher.log_path,
-            archive_dir=os.path.join(_LOG_DIR, "logs_archive"),
+            archive_dir=lambda: self._archive_dir_for_logs(),
             rotate_fn=self.log_watcher.rotate_to,
             threshold_mb=int(self.config.get("log_rotate_threshold_mb", 50)),
             check_every_s=int(self.config.get("log_rotate_check_seconds", 300)),
@@ -307,6 +454,31 @@ class AppState:
 
         # Current zone — used to update the overlay's "Quests in Zone".
         self._current_zone = None
+
+    def _archive_dir_for_logs(self) -> str:
+        r"""Where rotated logs go: <the EQ Logs folder we are watching>\old
+
+        Resolved fresh on every rotation, not captured once, so repointing the app
+        at a different Logs folder in Settings moves future archives with it.
+
+        Falls back to the pre-2026-08-08 location ONLY if we cannot determine the
+        watched folder — never guess a game directory, and never silently write
+        into one we are not already reading.
+        """
+        log_dir = ""
+        try:
+            log_dir = getattr(self.log_watcher, "_dir", "") or ""
+            if not log_dir:
+                p = self.log_watcher.log_path
+                if p:
+                    log_dir = os.path.dirname(p)
+        except Exception:
+            log_dir = ""
+        if not log_dir or not os.path.isdir(log_dir):
+            return os.path.join(_LOG_DIR, "logs_archive")
+        dest = os.path.join(log_dir, ARCHIVE_SUBDIR)
+        _write_archive_readme(dest)
+        return dest
 
         # Quest progress — required-item → quest lookup (rebuilt from the journal),
         # the player's full journaled quests (for completion checks), the set of
@@ -722,6 +894,17 @@ def _start_quest_sightings(app: AppState):
         # Upload on a background timer, then prune OUR archived log copies — never the
         # live EQ log. Pruning only runs after a CONFIRMED upload, so a user who is
         # signed out keeps their archives until the data is safely off the machine.
+        # ⚠ THIS THREAD WAS DEAD ON ARRIVAL UNTIL 2026-08-08.
+        # `time` was never imported in this module, so the very first statement
+        # raised NameError and the thread died on every launch, silently, because
+        # it is a daemon thread and nothing joins it. That is the whole reason
+        # `log_observations` had ZERO rows and "the learning loop has never run
+        # once" — it was never a data problem or an adoption problem. Board item
+        # #31 ("watch log_observations for a week before building") would have
+        # waited forever.
+        # Found by actually launching the app; a clean py_compile had hidden it
+        # for weeks. The try/except below deliberately does NOT wrap the sleep,
+        # so a repeat of this fails loudly in the log rather than silently.
         def _obs_pump():
             while True:
                 time.sleep(120)
@@ -899,10 +1082,13 @@ def _run_setup_wizard(app: "AppState", win) -> str:
     try:
         _mb.showinfo(
             "Welcome to Gnoll Guard",
-            "Let's find your EverQuest log file so Gnoll Guard can track your loot.\n\n"
+            "Let's find your EverQuest Logs folder so Gnoll Guard can track your loot.\n\n"
             "1. Browse to your EverQuest game folder\n"
             "2. Open the 'Logs' folder\n"
-            "3. Pick your character's log:  eqlog_<Character>_<Server>.txt\n\n"
+            "3. Pick ANY character's log:  eqlog_<Character>_<Server>.txt\n\n"
+            "You only need to pick one. Gnoll Guard watches the whole folder, so\n"
+            "every character you play is tracked automatically — you never have to\n"
+            "come back and switch this when you swap characters.\n\n"
             "You can change this any time in Settings.",
             parent=win,
         )
@@ -1151,6 +1337,22 @@ def main():
             app.log_rotator.start()
             win.update_watcher_status(f"watching — {os.path.basename(path)}")
             log.info("Log watcher now watching: %s", path)
+            return
+        # No FILE, but we may still know the FOLDER — the normal state right after
+        # log rotation, and on a fresh install before EQ has ever been launched.
+        # Watch it anyway; LogWatcher opens new logs as they appear, so the app is
+        # ready the moment EQ writes its first line. Before 2026-08-08 this fell
+        # through to "file not found" and the app sat there doing nothing.
+        _dir = app.config.get("log_dir") or getattr(app.log_watcher, "_dir", "")
+        if _dir and os.path.isdir(_dir) and not _looks_like_live_eq(_dir):
+            app.log_watcher._dir = _dir
+            app.log_watcher.start()
+            app.log_rotator.start()
+            n = len(glob.glob(os.path.join(_dir, "eqlog_*.txt")))
+            win.update_watcher_status(
+                f"watching {os.path.basename(_dir.rstrip(os.sep))} — "
+                + (f"{n} logs" if n else "waiting for EverQuest to start"))
+            log.info("Log watcher watching folder: %s (%d logs)", _dir, n)
         elif path:
             win.update_watcher_status(f"file not found: {path}")
             log.warning("Log watcher: file not found at %s", path)
@@ -1170,32 +1372,73 @@ def main():
             # pipeline would happily submit live-EQ quest dialogue into the EQL database if we
             # auto-attached to a live-EQ log. (Removed 2026-07-20 — those fallbacks were the
             # real cross-game hole.)
-            _search_dirs = [
-                app.config.get("eql_log_dir", ""),
+            # Widest net first, cheapest-and-most-authoritative order. The old list
+            # was just the config value plus ONE hardcoded C: path, so any non-default
+            # install went to the wizard for a folder the machine already knew.
+            _search_dirs = [app.config.get("eql_log_dir", "")]
+            _search_dirs += _eq_legends_logs_from_running_game()   # they're playing it
+            _search_dirs += _eq_legends_logs_from_registry()       # installer told us
+            _search_dirs += [
                 r"C:\Users\Public\Daybreak Game Company\Installed Games\EverQuest Legends\Logs",
+                r"C:\Users\Public\Sony Online Entertainment\Installed Games\EverQuest Legends\Logs",
             ]
-            _candidates: list[str] = []
-            for _log_dir in _search_dirs:
-                if not _log_dir:
-                    continue
-                _candidates = _glob.glob(os.path.join(_log_dir, "eqlog_*.txt"))
-                if not _candidates:
-                    _bare = os.path.join(_log_dir, "eqlog.txt")
-                    if os.path.isfile(_bare):
-                        _candidates = [_bare]
-                if _candidates:
+            # Same well-known layouts on any other fixed drive — a second install disk
+            # is the common case the single C: path missed.
+            try:
+                import string as _string
+                for _d in _string.ascii_uppercase[3:]:  # D: onward
+                    _root = f"{_d}:\\"
+                    if not os.path.isdir(_root):
+                        continue
+                    for _mid in ("Daybreak Game Company", "Sony Online Entertainment"):
+                        _search_dirs.append(
+                            os.path.join(_root, "Users", "Public", _mid,
+                                         "Installed Games", "EverQuest Legends", "Logs"))
+                        _search_dirs.append(
+                            os.path.join(_root, _mid, "Installed Games",
+                                         "EverQuest Legends", "Logs"))
+            except Exception:
+                pass
+            # ⚠ WE ARE LOOKING FOR A FOLDER, NOT A FILE (fixed 2026-08-08).
+            # This used to require a live eqlog_*.txt and gave up if it found none —
+            # which is exactly the state our OWN log rotation leaves behind. Rotation
+            # moves every eqlog_*.txt into the archive when EQ closes, so the next
+            # launch saw an empty folder, "detected" nothing, and threw the first-run
+            # wizard, asking the user to browse for a file the app itself had moved.
+            # Owner, 2026-08-08: "this popup needs to stop it should already know and
+            # it keeps asking me where."
+            # An empty Logs folder is NORMAL and LogWatcher.start() already handles it
+            # ("0 logs: none yet") — EQ recreates them on next launch and the watcher
+            # picks them up automatically. So a readable folder is all we need.
+            _found_dir = ""
+            for _cand_dir in _search_dirs:
+                if _cand_dir and os.path.isdir(_cand_dir) and not _looks_like_live_eq(_cand_dir):
+                    _found_dir = _cand_dir
                     break
-            if _candidates:
-                _log_path = max(_candidates, key=os.path.getmtime)
-                app.config["log_file_path"] = _log_path
+            if _found_dir:
+                app.config["log_dir"] = _found_dir
+                app.log_watcher._dir = _found_dir
+                # Newest existing log, purely so the status line can name something.
+                # None is fine and must NOT trigger the wizard.
+                _existing = _glob.glob(os.path.join(_found_dir, "eqlog_*.txt"))
+                if _existing:
+                    _log_path = max(_existing, key=os.path.getmtime)
+                    app.config["log_file_path"] = _log_path
                 _save_config(app.config)
-                log.info("Auto-detected EQ log: %s", _log_path)
+                log.info("Auto-detected EQ Logs folder: %s (%d logs present)",
+                         _found_dir, len(_existing))
         except Exception as e:
             log.debug("Log auto-detect failed: %s", e)
 
-    # First-run setup wizard — nothing auto-detected and nothing saved.
-    if not _log_path or not os.path.isfile(_log_path):
+    # First-run setup wizard — ONLY when we could not resolve a FOLDER. Having no
+    # log file is not a reason to ask: rotation and a fresh install both look like
+    # that, and in both cases the folder is the answer.
+    if not (app.config.get("log_dir") and os.path.isdir(app.config["log_dir"])):
         _log_path = _run_setup_wizard(app, win) or _log_path
+        if _log_path and os.path.isfile(_log_path):
+            app.config["log_dir"] = os.path.dirname(_log_path)
+            app.log_watcher._dir = app.config["log_dir"]
+            _save_config(app.config)
 
     # Final cross-game guard — never hand a LIVE-EverQuest log to the watcher, even if one
     # slipped in via a manual wizard pick. The app reads ONLY EverQuest Legends logs.
