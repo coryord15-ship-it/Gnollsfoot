@@ -104,7 +104,10 @@ class LogRotator:
             log.info("log is %.0f MB but EQ is running; deferring rotation",
                      size / 1024 / 1024)
             return
-        self._rotate_fn(self.archive_dir())
+        # min_bytes: archive ONLY the logs that are actually oversized. Without it,
+        # one big log crossing the threshold dragged every other character's log
+        # along with it — 12 files moved when 1 was large (owner, 2026-08-08).
+        self._rotate_fn(self.archive_dir(), self._threshold)
 
     def archive_dir(self) -> str:
         """Resolve where archives go, right now. Never raises — a broken callable
@@ -126,4 +129,5 @@ class LogRotator:
         """Manual rotate (e.g. a UI button). Refuses while EQ is running."""
         if eq_running(self._eq_exe):
             return None
-        return self._rotate_fn(self.archive_dir())
+        # Manual rotate ignores the size threshold — the user asked for it explicitly.
+        return self._rotate_fn(self.archive_dir(), 0)

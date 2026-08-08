@@ -208,20 +208,105 @@ class LogWatcher:
         except Exception:
             return matches[0]
 
-    def rotate_to(self, archive_dir: str) -> Optional[str]:
-        """Move EVERY matching character log into archive_dir and drop our handles so EQ
-        creates fresh logs next launch. ONLY call when EQ is closed (no active writer) —
-        moving a file EQ holds open would fail or corrupt it. Returns the archive path of
-        the last file moved, or None if nothing was rotated. Fresh logs are reopened
-        automatically as they appear."""
+    _TS_LINE = re.compile(r"^\[(?:\w{3}) (\w{3}) +(\d{1,2}) \d{2}:\d{2}:\d{2} (\d{4})\]")
+    _MONTHS = {m: i for i, m in enumerate(
+        ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
+         "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"], 1)}
+
+    @classmethod
+    def _log_date_range(cls, path: str) -> tuple[str, str]:
+        """(first_date, last_date) as YYYY-MM-DD, read from the log's own lines.
+
+        EQ stamps every line "[Sat Jul 11 13:11:40 2026] ...", so the range is the
+        first and last such line. Reads a small window from each END of the file —
+        these reach 50 MB+ and must never be read whole just to build a filename.
+        Returns ("", "") if the file has no parseable timestamps.
+        """
+        first = last = ""
+        try:
+            size = os.path.getsize(path)
+            with open(path, "rb") as fh:
+                for raw in fh.read(65536).splitlines():
+                    m = cls._TS_LINE.match(raw.decode("utf-8", "replace"))
+                    if m:
+                        first = f"{m.group(3)}-{cls._MONTHS.get(m.group(1), 1):02d}-{int(m.group(2)):02d}"
+                        break
+                fh.seek(max(0, size - 65536))
+                for raw in reversed(fh.read().splitlines()):
+                    m = cls._TS_LINE.match(raw.decode("utf-8", "replace"))
+                    if m:
+                        last = f"{m.group(3)}-{cls._MONTHS.get(m.group(1), 1):02d}-{int(m.group(2)):02d}"
+                        break
+        except OSError:
+            pass
+        return first, last
+
+    @classmethod
+    def archive_name_for(cls, path: str) -> str:
+        r"""The archived filename: original stem + the date range it covers.
+
+        eqlog_Morbid_freeport.txt  ->  eqlog_Morbid_freeport_2026-07-11_to_2026-08-07.bak
+
+        Owner asked for the span readable at a glance and tied to the original name
+        (2026-08-08). ISO dates rather than US: they sort chronologically in the
+        folder and cannot be misread day/month. Keeping the original stem as the
+        PREFIX makes every archive for a character sort right next to its live log,
+        which is the whole point — you find it without looking for it.
+
+        ⚠ The ".bak" extension is load-bearing. Archives sit in the SAME folder as
+        live logs, and the watcher globs "eqlog_*.txt" — ending in .bak is what stops
+        the app re-ingesting its own archives and double-counting every event.
+        """
+        base = os.path.basename(path)
+        stem = base[:-4] if base.lower().endswith(".txt") else base
+        first, last = cls._log_date_range(path)
+        # NEVER mix a date parsed from the log with one from the filesystem — that
+        # invented a "2026-07-11_to_2026-08-08" span for a log whose lines were all
+        # from Jul 11, purely because the file had been touched today. If only one
+        # end parses, that date IS the span; mtime is used only when neither does.
+        if not first and not last:
+            try:
+                first = last = datetime.fromtimestamp(
+                    os.path.getmtime(path)).strftime("%Y-%m-%d")
+            except OSError:
+                first = last = datetime.now().strftime("%Y-%m-%d")
+        else:
+            first = first or last
+            last = last or first
+        span = f"{first}_to_{last}" if first != last else first
+        return f"{stem}_{span}.bak"
+
+    def rotate_to(self, archive_dir: Optional[str] = None,
+                  min_bytes: int = 0) -> Optional[str]:
+        """Archive character logs so EQ starts fresh ones next launch.
+
+        RENAMES IN PLACE by default (archive_dir=None) — the archive stays in the
+        EQ Logs folder next to the live log. Changed 2026-08-08: this used to MOVE
+        every log to a folder outside the game directory, and the owner's concern
+        was the right one — "im worried people are gonna look for their logs and not
+        know where they are". A renamed file in the same folder cannot be hunted for.
+
+        min_bytes: only archive logs at least this big. Previously ONE oversized log
+        crossing the threshold caused ALL of them to be archived — on the owner's
+        machine that moved 12 files when only 1 was large and nine were empty July
+        stubs. The size check lives here now because rotate_to is what iterates.
+
+        ONLY call when EQ is closed — renaming a file EQ holds open fails on Windows.
+        Returns the last archive path, or None if nothing qualified.
+        """
         with self._lock:
             matches = self._matching_files()
             if not matches:
                 return None
-            stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            os.makedirs(archive_dir, exist_ok=True)
+            if archive_dir:
+                os.makedirs(archive_dir, exist_ok=True)
             last_dest = None
             for path in matches:
+                try:
+                    if min_bytes and os.path.getsize(path) < min_bytes:
+                        continue          # leave small logs exactly where EQ put them
+                except OSError:
+                    continue
                 f = self._files.pop(path, None)
                 if f:
                     try:
@@ -231,12 +316,19 @@ class LogWatcher:
                 self._pos.pop(path, None)
                 self._partial.pop(path, None)
                 try:
-                    dest = os.path.join(archive_dir, f"{os.path.basename(path)}.{stamp}.bak")
+                    name = self.archive_name_for(path)
+                    dest = os.path.join(archive_dir or os.path.dirname(path), name)
+                    if os.path.exists(dest):      # same span archived twice
+                        root, ext = os.path.splitext(dest)
+                        n = 2
+                        while os.path.exists(f"{root}_{n}{ext}"):
+                            n += 1
+                        dest = f"{root}_{n}{ext}"
                     shutil.move(path, dest)
                     last_dest = dest
-                    log.info("Rotated log -> %s", dest)
+                    log.info("Archived log -> %s", dest)
                 except Exception:
-                    log.exception("log rotation move failed for %s", path)
+                    log.exception("log rotation failed for %s", path)
                     if os.path.exists(path):
                         self._open_file(path)
             return last_dest

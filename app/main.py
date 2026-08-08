@@ -456,29 +456,22 @@ class AppState:
         self._current_zone = None
 
     def _archive_dir_for_logs(self) -> str:
-        r"""Where rotated logs go: <the EQ Logs folder we are watching>\old
+        """Returns "" — archives are RENAMED IN PLACE, in the EQ Logs folder.
 
-        Resolved fresh on every rotation, not captured once, so repointing the app
-        at a different Logs folder in Settings moves future archives with it.
+        Owner's call, 2026-08-08, after asking the right question: "im worried
+        people are gonna look for their logs and not know where they are". Every
+        design that MOVES the file has the same flaw — the user has to already know
+        where it went. A renamed file in the folder they are already looking at does
+        not. So rotate_to() gets an empty archive_dir and renames beside the original:
 
-        Falls back to the pre-2026-08-08 location ONLY if we cannot determine the
-        watched folder — never guess a game directory, and never silently write
-        into one we are not already reading.
+            eqlog_Morbid_freeport.txt
+            eqlog_Morbid_freeport_2026-07-11_to_2026-08-07.bak
+
+        Kept as a method (rather than deleted) because LogRotator resolves the
+        archive dir on every rotation, and a future "archive to a chosen folder"
+        setting plugs straight back in here.
         """
-        log_dir = ""
-        try:
-            log_dir = getattr(self.log_watcher, "_dir", "") or ""
-            if not log_dir:
-                p = self.log_watcher.log_path
-                if p:
-                    log_dir = os.path.dirname(p)
-        except Exception:
-            log_dir = ""
-        if not log_dir or not os.path.isdir(log_dir):
-            return os.path.join(_LOG_DIR, "logs_archive")
-        dest = os.path.join(log_dir, ARCHIVE_SUBDIR)
-        _write_archive_readme(dest)
-        return dest
+        return ""
 
         # Quest progress — required-item → quest lookup (rebuilt from the journal),
         # the player's full journaled quests (for completion checks), the set of
