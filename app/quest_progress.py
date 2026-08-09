@@ -53,8 +53,59 @@ def save_progress(progress: set):
         log.debug("Could not save quest progress", exc_info=True)
 
 
+def _given_counts_file() -> str:
+    return _data_file("quest_given_counts.json")
+
+
+def load_given_counts() -> dict:
+    """How MANY of each required item the player has turned in — {name_lower: int}.
+
+    ⚠ `quest_given` (the set) CANNOT COUNT, and that is a real bug for repeatable quests.
+    Once an item name enters it, EVERY step referencing that item shows a green tick
+    forever, on every character, for every subsequent run. The owner hit this on
+    2026-08-08 running SoulFire four times: after pass one the journal reported the whole
+    quest complete and stopped being able to tell him what was left.
+
+    Counts are additive and per-name. Kept in a SEPARATE file so an old client reading
+    quest_given.json still works and a downgrade loses the counts, not the ticks.
+    Migrated on first load: every name already in the set starts at 1.
+    """
+    try:
+        with open(_given_counts_file()) as f:
+            return {str(k).lower(): int(v) for k, v in json.load(f).items()}
+    except Exception:
+        # First run after the fix — seed from the legacy set so nothing regresses.
+        return {name: 1 for name in load_given()}
+
+
+def save_given_counts(counts: dict):
+    try:
+        with open(_given_counts_file(), "w") as f:
+            json.dump({k: int(v) for k, v in sorted(counts.items())}, f)
+    except Exception:
+        log.debug("Could not save quest given-counts", exc_info=True)
+
+
+def record_given(item_name: str, counts: dict, given: set) -> tuple[dict, set]:
+    """Record ONE turn-in of `item_name`, keeping both the counter and the legacy set.
+
+    Returns the updated (counts, given) so callers stay explicit about the write.
+    """
+    low = (item_name or "").strip().lower()
+    if not low:
+        return counts, given
+    counts[low] = counts.get(low, 0) + 1
+    given.add(low)
+    return counts, given
+
+
 def load_given() -> set:
-    """Required-item names (lowercased) the player has TURNED IN to an NPC."""
+    """Required-item names (lowercased) the player has TURNED IN to an NPC.
+
+    ⚠ This is a SET — it records THAT an item was handed over, never HOW MANY TIMES.
+    For anything repeatable use load_given_counts(). Kept for the ✔ markers and for
+    backward compatibility with clients that predate the counter.
+    """
     try:
         with open(_given_file()) as f:
             return {str(x).lower() for x in json.load(f)}
