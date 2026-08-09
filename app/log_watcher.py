@@ -37,6 +37,14 @@ from app.parsers.game_events import GameEventParser, TurnInEvent
 
 log = logging.getLogger(__name__)
 
+# How long after a kill or turn-in a faction line may still be attributed to it.
+# The game emits the whole faction burst in the same second as the kill; 3s is slack for
+# log flushing, not a guess at game behaviour. Beyond it the delta is recorded with NO
+# cause rather than blamed on a stale one — an unattributed number is honest, a
+# misattributed one becomes "kill X for faction Y" on the website and is worse than
+# nothing. See _dispatch.
+_FACTION_ATTRIB_S = 3.0
+
 
 class LogWatcher:
     def __init__(self, config: dict):
@@ -85,6 +93,36 @@ class LogWatcher:
                          r"Your Location is (?P<x>-?[\d.]+), (?P<y>-?[\d.]+), (?P<z>-?[\d.]+)"),
             re.IGNORECASE,
         )
+        # Faction — "Your faction standing with <X> has been adjusted by <N>."
+        #
+        # The cleanest data in the entire log and we ignored it until 2026-08-08: an
+        # exact signed integer, a named faction, and the kill or turn-in that caused it
+        # sitting one line above. Faction is the most opaque system in EQ and the most
+        # common hard block on a quest — the owner lost an evening to a Priests of Life
+        # gate that nothing in our data could have warned him about.
+        #
+        # Two shapes. The second fires at the cap and carries NO number; recording it as
+        # 0 would be wrong (it means "maxed", not "no change"), so it is flagged instead.
+        self._faction_pattern = re.compile(
+            patterns.get("faction_line",
+                         r"Your faction standing with (?P<faction>.+?) has been adjusted by "
+                         r"(?P<delta>-?\d+)\."),
+            re.IGNORECASE,
+        )
+        self._faction_capped_pattern = re.compile(
+            patterns.get("faction_capped",
+                         r"Your faction standing with (?P<faction>.+?) could not possibly get any "
+                         r"(?P<direction>better|worse)\."),
+            re.IGNORECASE,
+        )
+        # One kill emits a BURST of faction lines (5 is typical). They all share a cause,
+        # so remember the last kill/turn-in and attribute anything arriving within
+        # _FACTION_ATTRIB_S of it. Without this the numbers are unattributable and the
+        # whole point — "what do I kill to raise this" — is lost.
+        self._last_cause: Optional[dict] = None
+        # Faction lines waiting for the kill they belong to (see _dispatch).
+        self._pending_faction: list = []
+
         self._last_loc: Optional[dict] = None
         self._current_zone = None
         self._current_difficulty = None
@@ -101,6 +139,8 @@ class LogWatcher:
         self._on_turn_in: list[Callable[[TurnInEvent], None]] = []
         self._on_zone: list[Callable[[str], None]] = []
         self._on_kill: list[Callable[[str], None]] = []
+        # (faction, delta, capped_direction|None, cause_kind|None, cause_name|None)
+        self._on_faction: list[Callable[[dict], None]] = []
         self._on_any_line: list[Callable[[str], None]] = []  # raw-line callbacks (matcher hail/say, …)
         self._on_craft: list[Callable] = []                  # tradeskill combines
         # An offer's verdict lives in the NEXT few lines, so hold the pending offer and
@@ -139,6 +179,10 @@ class LogWatcher:
         return out
     def on_zone(self, fn): self._on_zone.append(fn)
     def on_kill(self, fn): self._on_kill.append(fn)
+
+    def on_faction(self, fn):
+        """fn(dict) with keys: faction, delta, capped, cause_kind, cause_name."""
+        self._on_faction.append(fn)
     def on_any_line(self, fn): self._on_any_line.append(fn)
     def on_craft(self, fn): self._on_craft.append(fn)
 
@@ -354,8 +398,48 @@ class LogWatcher:
         )
         self._kill_pattern = re.compile(
             patterns.get("kill_line", r"You have slain (?P<mob>.+?)!"), re.IGNORECASE)
+        # Hot-reload these too, or editing settings.json silently stops updating them
+        # while every other pattern keeps working — the kind of half-broken state that
+        # takes an hour to notice.
+        self._faction_pattern = re.compile(
+            patterns.get("faction_line",
+                         r"Your faction standing with (?P<faction>.+?) has been adjusted by "
+                         r"(?P<delta>-?\d+)\."),
+            re.IGNORECASE,
+        )
+        self._faction_capped_pattern = re.compile(
+            patterns.get("faction_capped",
+                         r"Your faction standing with (?P<faction>.+?) could not possibly get any "
+                         r"(?P<direction>better|worse)\."),
+            re.IGNORECASE,
+        )
 
     # ── Internal ─────────────────────────────────────────────────────────────
+
+    def _emit_faction(self, evt: dict):
+        for fn in self._on_faction:
+            try:
+                fn(evt)
+            except Exception:
+                log.exception("on_faction callback error")
+
+    def _flush_pending_faction(self, cause_kind=None, cause_name=None):
+        """Emit buffered faction lines, attributing them to the kill that just landed.
+
+        Anything older than _FACTION_ATTRIB_S is emitted with NO cause rather than
+        blamed on a kill it did not come from. An unattributed delta is honest and
+        still aggregates per-faction; a misattributed one becomes "kill X to raise Y"
+        on the website and is worse than having no data at all.
+        """
+        if not self._pending_faction:
+            return
+        now = time.time()
+        pending, self._pending_faction = self._pending_faction, []
+        for evt, at in pending:
+            if cause_kind and (now - at) <= _FACTION_ATTRIB_S:
+                evt["cause_kind"] = cause_kind
+                evt["cause_name"] = cause_name
+            self._emit_faction(evt)
 
     def _open_file(self, path: str, seek_end: bool = True):
         """Open one log file for tailing and record its start position."""
@@ -493,9 +577,48 @@ class LogWatcher:
                 except Exception: log.exception("on_loot callback error")
             return
 
+        # ── Faction ──────────────────────────────────────────────────────────────
+        # ⚠ THE TWO CAUSES SIT ON OPPOSITE SIDES OF THE FACTION LINES. Verified against
+        # a real log 2026-08-08:
+        #     KILL     21:05:34  Your faction standing with Priests of Life ... by 5.
+        #              21:05:34  You have slain a putrid skeleton!      <- cause comes AFTER
+        #     TURN-IN  20:13:04  You offered 1 Sealed Note to Brother Hayle.
+        #              20:13:06  Your faction standing with Priests of Life ... by 10.
+        #                                                                <- cause came BEFORE
+        # So faction attributes FORWARD to a kill and BACKWARD to a turn-in.
+        #
+        # Getting this wrong is not a subtle error: attributing backward for kills
+        # credited "a skeleton" 14 times on this log, when plain skeletons award NOTHING
+        # (0 for 11 measured) and every one of those points belonged to the putrid
+        # skeleton killed immediately after. That would have shipped "kill a skeleton for
+        # +5 Priests of Life" to the website as measured fact.
+        fm = self._faction_pattern.search(line)
+        fc = None if fm else self._faction_capped_pattern.search(line)
+        if fm or fc:
+            evt = {
+                "faction": (fm or fc).group("faction").strip(),
+                "delta": int(fm.group("delta")) if fm else None,
+                "capped": None if fm else fc.group("direction").lower(),
+                "cause_kind": None,
+                "cause_name": None,
+            }
+            cause = self._last_cause or {}
+            # Backward: a turn-in that just happened owns this line.
+            if (cause.get("kind") == "turn_in"
+                    and (time.time() - cause.get("at", 0)) <= _FACTION_ATTRIB_S):
+                evt["cause_kind"] = cause["kind"]
+                evt["cause_name"] = cause["name"]
+                self._emit_faction(evt)
+            else:
+                # Forward: hold it for the kill line that is about to arrive.
+                self._pending_faction.append((evt, time.time()))
+            return
+
         km = self._kill_pattern.search(line)
         if km:
             mob = km.group("mob").strip()
+            self._flush_pending_faction(cause_kind="kill", cause_name=mob)
+            self._last_cause = {"kind": "kill", "name": mob, "at": time.time()}
             for fn in self._on_kill:
                 try: fn(mob)
                 except Exception: log.exception("on_kill callback error")
@@ -552,6 +675,35 @@ class LogWatcher:
             offer = self._event_parser.classify_turn_in(offer, after)
         except Exception:
             log.exception("turn-in classification error")
+        # A hand-in moves faction too, often more than a kill does (Brother Hayle pays
+        # +10 Priests of Life per Sealed Note). Record it as the cause so the faction
+        # burst that follows is attributed to the NPC rather than to whatever was killed
+        # ten minutes ago.
+        # 🔴 PRIVACY GATE — "You offered <item> to <name>" fires on PLAYER-TO-PLAYER TRADES
+        # exactly as it does on quest hand-ins, so <name> is frequently another player.
+        # Without this check the faction attribution uploads their character name as a
+        # "cause", which is the same leak class this project already had to fix once
+        # (see player_roster.py). Caught 2026-08-08 when a backfill produced a faction row
+        # attributed to "spiken" — a guildmate, not an NPC.
+        #
+        # The roster learns players from channels NPCs cannot use (guild/group/tell/shout/
+        # OOC). Deny-by-default: if the roster says player, drop the attribution entirely
+        # rather than record it. An unattributed faction delta is still useful; a player's
+        # name in our database is not.
+        #
+        # ⚠ It is also almost always a MISATTRIBUTION: a player trade does not move faction,
+        # so any delta following one came from something else. Dropping it is correct twice
+        # over.
+        try:
+            npc = getattr(offer, "npc_name", None)
+            if npc and not self.roster.is_player(npc):
+                self._last_cause = {"kind": "turn_in", "name": npc, "at": time.time()}
+            elif npc:
+                log.debug("faction cause suppressed — %r is a known player", npc)
+                self._last_cause = None
+        except Exception:
+            pass
+
         for fn in self._on_turn_in:
             try: fn(offer)
             except Exception: log.exception("on_turn_in callback error")

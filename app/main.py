@@ -887,10 +887,30 @@ def _start_quest_sightings(app: AppState):
 
         app.log_watcher.on_turn_in(_turn_in_obs)
         app.log_watcher.on_kill(lambda mob: obs.add("kill", {"mob": mob}, _zone_now["z"]))
+        # Faction. GAME NOUNS ONLY — a faction name, a signed integer, and the mob or NPC
+        # that caused it. Nothing here identifies a player.
+        #
+        # ⚠ `delta` may legitimately be 0-free/None when `capped` is set ("could not
+        # possibly get any better/worse"). Do NOT coerce that to 0: capped means MAXED,
+        # and a 0 would be averaged in as "this kill gives nothing".
+        app.log_watcher.on_faction(lambda e: obs.add(
+            "faction",
+            {"faction": e.get("faction"), "delta": e.get("delta"), "capped": e.get("capped"),
+             "cause_kind": e.get("cause_kind"), "cause_name": e.get("cause_name")},
+            _zone_now["z"]))
         app.log_watcher.on_zone(lambda z: obs.add("zone", {"zone": z}, z))
+        # ⚠ THE FIELD IS `npc_name`. This read `mob_name` — a name LootEvent has never had —
+        # so getattr returned its default None on every single loot event, and
+        # ObservationQueue.add() strips None, so the key vanished rather than showing as
+        # null. Every loot row we have collected reads {"item": ...} with no mob attached.
+        #
+        # That one word is why we could not answer "which mob drops this, and how often" —
+        # the single most-asked question about any EQ item. The parser had the mob the whole
+        # time (loot_triggers captures `npc`), the kill side already worked, and the
+        # drop_rate_stats view joins the two. Nothing else was missing. (2026-08-08)
         app.log_watcher.on_loot(lambda ev: obs.add(
             "loot", {"item": getattr(ev, "item_name", None),
-                     "mob": getattr(ev, "mob_name", None)}, _zone_now["z"]))
+                     "mob": getattr(ev, "npc_name", None)}, _zone_now["z"]))
 
         # Upload on a background timer, then prune OUR archived log copies — never the
         # live EQ log. Pruning only runs after a CONFIRMED upload, so a user who is

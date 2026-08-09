@@ -16,8 +16,8 @@
   "log_patterns": {
     "timestamp": "\\[\\w+ \\w+ +\\d+ \\d+:\\d+:\\d+ \\d+\\]",
     "loot_triggers": [
-      "--You have looted (?:a |an )?(?P<item>.+?) from (?:a |an )?(?P<npc>[^']+?)'s corpse\\.--",
-      "--You have looted (?:a |an )?(?P<item>.+?)\\.--"
+      "--You have looted (?:a |an |(?P<qty>\\d+) )?(?P<item>.+?) from (?:a |an )?(?P<npc>[^']+?)'s corpse\\.--",
+      "--You have looted (?:a |an |(?P<qty>\\d+) )?(?P<item>.+?)\\.--"
     ],
     "npc_dialogue": "(?P<npc>[\\w ]+) says(?:, '| ')(?P<text>.+?)'?$",
     "zone_line": "You have entered (?P<zone>.+?)(?: (?P<diff>\\d+) \\((?P<difflabel>[^)]+)\\))?\\.",
@@ -25,6 +25,8 @@
     "quest_turn_in": "You offered \\d+ (?P<item>.+?) to (?P<npc>.+?)\\.\\s*$",
     "auto_sold": "You looted (?:a |an |(?P<qty>\\d+) )?(?P<item>.+?) from (?:a |an )?(?P<npc>.+?)'s corpse and sold it for (?P<price>.+?)\\.",
     "kill_line": "You have slain (?P<mob>.+?)!",
+    "faction_line": "Your faction standing with (?P<faction>.+?) has been adjusted by (?P<delta>-?\\d+)\\.",
+    "faction_capped": "Your faction standing with (?P<faction>.+?) could not possibly get any (?P<direction>better|worse)\\.",
     "tradeskill_success": "You have fashioned the items together to create (?:something new:\\s*)?(?:an? )?(?P<item>.+?)\\.\\s*$",
     "tradeskill_failure": "You lacked the skills to fashion (?:an? )?(?P<item>.+?)\\.\\s*$"
   },

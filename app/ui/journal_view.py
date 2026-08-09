@@ -149,24 +149,58 @@ def render_quest_card(
                 text_color=t["text_secondary"], anchor="w", justify="left", wraplength=440,
             ).pack(anchor="w", padx=(4, 4))
 
+        # ⚠ WHAT THE STEP GIVES BACK. This was never rendered — the journal showed the
+        # instruction and an "Items:" list of what to HAND OVER, and nothing anywhere said
+        # what you RECEIVE. `expected_reward_item` has been populated on nearly every step
+        # the whole time and no code read it.
+        #
+        # That turns a chain into a list of disconnected errands. Reported by the owner
+        # mid-run on SoulFire 2026-08-08: he reached step 21, needed a Brilliant Sword of
+        # Faith, and had no way to see that step 19 is what produces one — so the quest read
+        # as if it were missing a piece. It was not; the reward was invisible.
+        #
+        # Show it directly under the instruction, before the Items row, so "hand X → get Y"
+        # reads as one thought.
+        reward = s.get("expected_reward_item")
+        if reward:
+            ctk.CTkLabel(
+                row, text="   → " + str(reward), font=t["font_body_small"],
+                text_color=t["gold"], anchor="w", justify="left", wraplength=440,
+            ).pack(anchor="w", padx=(4, 4))
+
         req = s.get("required_items") or [i.get("item_name") for i in (s.get("items") or []) if i.get("item_name")]
         if req:
+            # ⚠ ONE ITEM PER LINE. These were packed side="left" into a single horizontal
+            # frame with no wrapping, so every item past the window width was CLIPPED —
+            # rendered, but off the edge, with nothing to indicate more existed.
+            #
+            # SoulFire step 21 needs four items (A Sealed Note, Testimony, Glowing Sword
+            # Hilt, Brilliant Sword of Faith). The journal displayed ONE. The owner hit this
+            # mid-run on 2026-08-08 and concluded the quest data was broken — reasonably,
+            # because the checklist that tells you what to go and get was hiding three of
+            # the four things he needed. The data was complete the entire time.
+            #
+            # Vertical stacking cannot truncate: a long name wraps, it does not vanish.
+            # The horizontal layout looked fine for the 1-2 short items most steps have,
+            # which is exactly why it survived until a 4-item step exposed it.
             irow = ctk.CTkFrame(row, fg_color="transparent")
-            irow.pack(anchor="w", padx=(4, 4), pady=(2, 0))
+            irow.pack(anchor="w", fill="x", padx=(4, 4), pady=(2, 0))
             ctk.CTkLabel(
-                irow, text="   Items:", font=t["font_body_small"], text_color=t["text_secondary"],
-            ).pack(side="left")
+                irow, text="   Items:", font=t["font_body_small"],
+                text_color=t["text_secondary"], anchor="w",
+            ).pack(anchor="w")
             for it in req:
                 low = it.lower()
                 if low in given:
-                    imark, col = "  ✔ ", t["green"]
+                    imark, col = "      ✔ ", t["green"]
                 elif low in prog:
-                    imark, col = "  ✓ ", t["gold"]
+                    imark, col = "      ✓ ", t["gold"]
                 else:
-                    imark, col = "  ○ ", t["text_secondary"]
+                    imark, col = "      ○ ", t["text_secondary"]
                 ctk.CTkLabel(
                     irow, text=imark + it, font=t["font_body_small"], text_color=col,
-                ).pack(side="left")
+                    anchor="w", justify="left", wraplength=430,
+                ).pack(anchor="w")
 
         if is_structured and (on_toggle_step or on_copy):
             btn_row = ctk.CTkFrame(row, fg_color="transparent")
