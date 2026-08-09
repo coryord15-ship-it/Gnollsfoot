@@ -1134,20 +1134,31 @@ class MainWindow(ctk.CTk):
     # ── Close ─────────────────────────────────────────────────────────────────
 
     def _on_close(self):
-        """Hide to tray rather than quit. Show a one-time hint the first time."""
-        import tkinter.messagebox as _mb
-        cfg = getattr(self._app, "config", {})
-        if not cfg.get("_tray_hint_shown"):
-            cfg["_tray_hint_shown"] = True
-            try:
-                self._app.save_config()
-            except Exception:
-                pass
-            _mb.showinfo(
-                "Gnoll Guard is still running",
-                "Gnoll Guard is watching your loot in the background.\n\n"
-                "Find it in the system tray (bottom-right of your taskbar).\n"
-                "Right-click the icon to quit.",
-                parent=self,
-            )
-        self.withdraw()
+        """X QUITS THE APP. It does not hide to the tray.
+
+        Owner instruction, 2026-08-09: *"i dont want the journal minizing to the mini
+        taskbar again its confusing users"* … *"no more minimizing it that was always
+        weird that you did that"*.
+
+        WHAT IT USED TO DO, and why it was worse than "weird": X called `withdraw()`,
+        which unmaps the window and leaves the process running invisibly. A user who
+        clicked X and then clicked the desktop shortcut again hit the single-instance
+        guard, which tried to re-show the hidden window by exact title — and that lookup
+        has never matched (see `_ensure_single_instance` in main.py). So they got a
+        message box pointing at the system tray and no window. **That is almost certainly
+        the "it didn't even open" report**: it had opened, weeks ago, and was hidden.
+
+        Closing for real removes the whole failure class — there is no hidden window left
+        to fail to restore.
+
+        ⚠ Go through the app's real shutdown, not `destroy()`. It flushes queued quest
+        sightings and stops the log watcher and rotator; skipping it drops whatever the
+        session had not uploaded yet."""
+        quit_app = getattr(self._app, "shutdown", None)
+        if callable(quit_app):
+            quit_app()
+            return
+        # Fallback only — an older AppState with no shutdown hook. Better to close
+        # without the flush than to leave the user with a window that ignores X.
+        self._shutting_down = True
+        self.destroy()

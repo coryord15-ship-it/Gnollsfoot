@@ -1146,7 +1146,7 @@ def _ensure_single_instance() -> bool:
         import ctypes
         handle = ctypes.windll.kernel32.CreateMutexW(None, False, "GnollGuard_v1_Mutex")
         if ctypes.windll.kernel32.GetLastError() == 183:  # ERROR_ALREADY_EXISTS
-            hwnd = ctypes.windll.user32.FindWindowW(None, "Gnoll Guard")
+            hwnd = _find_main_window()
             if hwnd:
                 ctypes.windll.user32.ShowWindow(hwnd, 9)       # SW_RESTORE
                 ctypes.windll.user32.SetForegroundWindow(hwnd)
@@ -1154,8 +1154,7 @@ def _ensure_single_instance() -> bool:
                 ctypes.windll.user32.MessageBoxW(
                     0,
                     "Gnoll Guard is already running.\n\n"
-                    "Check the system tray (bottom-right of your taskbar) "
-                    "and click the Gnoll Guard icon to reopen it.",
+                    "Look for its window — it may be behind another window.",
                     "Gnoll Guard",
                     0x40,  # MB_ICONINFORMATION
                 )
@@ -1163,6 +1162,46 @@ def _ensure_single_instance() -> bool:
     except Exception:
         pass  # Non-Windows or ctypes missing — proceed
     return True
+
+
+def _find_main_window():
+    """HWND of a running Gnoll Guard main window, or 0.
+
+    🔴 THIS IS THE "it didn't even open" BUG. The old code called
+    `FindWindowW(None, "Gnoll Guard")`, which matches the window title **exactly** — but
+    the title is `Gnoll Guard v{__version__}` (main_window.py sets it), so the lookup has
+    returned NULL for every version that has ever shipped with a version in the title.
+    Second launch therefore never raised the window; it showed a message box and nothing
+    else, which is indistinguishable from "the app didn't open".
+
+    Enumerating and prefix-matching fixes it and cannot break again when the version
+    changes. Matching on the prefix is safe because the title is ours and the mutex has
+    already proved one of our processes is alive.
+    """
+    import ctypes
+    from ctypes import wintypes
+
+    found = ctypes.c_void_p(0)
+
+    @ctypes.WINFUNCTYPE(ctypes.c_bool, wintypes.HWND, wintypes.LPARAM)
+    def _cb(hwnd, _lparam):
+        length = ctypes.windll.user32.GetWindowTextLengthW(hwnd)
+        if length <= 0:
+            return True
+        buf = ctypes.create_unicode_buffer(length + 1)
+        ctypes.windll.user32.GetWindowTextW(hwnd, buf, length + 1)
+        if buf.value.startswith("Gnoll Guard"):
+            # Skip our own message boxes and any tool window with the same prefix.
+            if ctypes.windll.user32.GetWindow(hwnd, 4) == 0:   # GW_OWNER: top-level only
+                found.value = hwnd
+                return False                                   # stop enumerating
+        return True
+
+    try:
+        ctypes.windll.user32.EnumWindows(_cb, 0)
+    except Exception:
+        return 0
+    return found.value or 0
 
 
 def _show_boot_splash():
@@ -1524,6 +1563,11 @@ def main():
 
     app.update_checker = UpdateChecker(_on_update)
     app.update_checker.start()
+
+    # The window's X button needs a real quit, and the shutdown routine lives here rather
+    # than in the UI layer (it flushes sightings and stops the watcher/rotator). Hand it
+    # to the window instead of having main_window import main — that would be a cycle.
+    app.shutdown = lambda: win.safe_after(0, _shutdown(app))
 
     # Start tray in background thread
     threading.Thread(target=lambda: _build_tray(app), daemon=True, name="SysTray").start()
