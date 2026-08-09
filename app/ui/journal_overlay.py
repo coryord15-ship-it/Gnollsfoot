@@ -708,11 +708,21 @@ class OverlayManager:
             return
 
         def load():
+            # ⚠ A FAILED LOAD MUST NOT LOOK LIKE AN EMPTY JOURNAL.
+            # This used to set `quests = []` on any exception and hand it straight to
+            # _apply_quests(), which docks (closes) every bubble missing from the list —
+            # so one network blip, expired token, or sleeping laptop silently closed every
+            # pop-out the player had open. Worse, _apply_quests also pushed that empty list
+            # into quest_matcher, killing step auto-detection until the next successful
+            # refresh, with nothing on screen to say so.
+            #
+            # None = "could not load, keep what we have". [] = "you genuinely have no quests".
+            # Those are different states and the code has to be able to tell them apart.
             try:
                 quests = self._app.supabase.get_journal() or []
             except Exception:
-                log.debug("journal load for bubbles failed", exc_info=True)
-                quests = []
+                log.debug("journal load for bubbles failed — keeping current state", exc_info=True)
+                quests = None
             master = self._master
             if master is None:
                 return
@@ -723,7 +733,11 @@ class OverlayManager:
 
         threading.Thread(target=load, daemon=True, name="OverlayJournalRefresh").start()
 
-    def _apply_quests(self, quests: list):
+    def _apply_quests(self, quests: list | None):
+        # None means the load failed (see refresh_journal). Change nothing and try again on
+        # the next refresh — do NOT dock the bubbles and do NOT wipe the matcher.
+        if quests is None:
+            return
         by_id = {q.get("id"): q for q in (quests or [])}
         try:
             from app import quest_progress

@@ -462,6 +462,9 @@ class AppState:
         self._journal_quests: list = []
         self._quest_progress: set = quest_progress.load_progress()
         self._quest_given: set = quest_progress.load_given()
+        # How many times each item has been handed in. The set above can only say
+        # "ever" — see quest_progress.load_given_counts() for why that broke repeat runs.
+        self._quest_given_counts: dict = quest_progress.load_given_counts()
 
         # Structured quest-step auto-completion (QUEST_STEPS_PLAN.md v1). State is
         # local, keyed to the primary character on this install — same single-file
@@ -704,9 +707,14 @@ def _on_turn_in(app: AppState, evt):
     if not quest_name:
         return
 
-    if item_name.lower() not in app._quest_given:
-        app._quest_given.add(item_name.lower())
-        quest_progress.save_given(app._quest_given)
+    # ⚠ COUNT IT, don't just flag it. The old code only recorded the item the FIRST time
+    # it was ever handed over ("if not in set"), so a repeatable quest run a second time
+    # produced no record at all and the journal reported it permanently complete. Always
+    # increment; the set is kept alongside for the ✔ markers and older clients.
+    app._quest_given_counts, app._quest_given = quest_progress.record_given(
+        item_name, getattr(app, "_quest_given_counts", None) or {}, app._quest_given)
+    quest_progress.save_given(app._quest_given)
+    quest_progress.save_given_counts(app._quest_given_counts)
 
     # Did this complete any journaled quest? If so, auto-remove it.
     completed = [q for q in app._journal_quests

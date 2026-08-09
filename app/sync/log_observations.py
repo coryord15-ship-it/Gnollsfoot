@@ -137,14 +137,20 @@ class ObservationQueue:
                     with urllib.request.urlopen(req, timeout=30):
                         sent += len(chunk)
                 except urllib.error.HTTPError as he:
-                    # 409 = the dedup index already has these rows. That is SUCCESS, not
-                    # failure: the data is safely stored. Treating it as an error would
-                    # leave the offset un-advanced and jam this install's queue forever,
-                    # silently, which is exactly the failure mode this project keeps
-                    # hitting. (merge-duplicates cannot help — the unique index is an
-                    # EXPRESSION index and PostgREST's on_conflict can only name columns.)
+                    # 🔴 A 409 IS NOT "ALREADY STORED". Postgres aborts the ENTIRE INSERT on
+                    # the first duplicate key, so a batch containing one dup stores NOTHING —
+                    # yet the old code counted the whole chunk as sent and let the offset
+                    # advance past it. Those rows were dropped AND skipped forever.
+                    # Measured on one install 2026-08-09: 2,074 local observations →
+                    # 460 survived the (then time-less) dedup index → only 37 ever reached
+                    # the table. The queue reported itself healthy the whole time.
+                    #
+                    # The original comment was right about the danger of the opposite bug —
+                    # treating 409 as failure jams the queue forever on one poisoned row —
+                    # so do neither. RETRY THE BATCH ROW BY ROW: genuine duplicates 409
+                    # individually and are skipped, every other row still lands.
                     if he.code == 409:
-                        sent += len(chunk)
+                        sent += self._insert_individually(chunk, token)
                     else:
                         raise
         except Exception as e:
@@ -154,6 +160,35 @@ class ObservationQueue:
         self._write_offset(new_off)
         self.uploaded += sent
         return sent
+
+    def _insert_individually(self, chunk: list, token: str) -> int:
+        """Fallback for a 409'd batch: post each row alone so one duplicate cannot sink 499
+        good rows. Returns how many were genuinely stored (409s do not count).
+
+        Slow by design — it only runs on the batch that actually collided, and a batch
+        rarely collides twice. Correctness beats throughput here: the alternative silently
+        discarded up to BATCH rows per collision and advanced the offset past them.
+        """
+        import urllib.error
+        import urllib.request
+
+        stored = 0
+        for row in chunk:
+            req = urllib.request.Request(
+                f"{SUPABASE_URL}/rest/v1/log_observations",
+                data=json.dumps([row]).encode("utf-8"), method="POST")
+            req.add_header("apikey", self._anon_key)
+            req.add_header("Authorization", f"Bearer {token}")
+            req.add_header("Content-Type", "application/json")
+            req.add_header("Prefer", "return=minimal")
+            try:
+                with urllib.request.urlopen(req, timeout=30):
+                    stored += 1
+            except urllib.error.HTTPError as he:
+                if he.code == 409:
+                    continue          # genuine duplicate — already stored, nothing lost
+                raise                 # anything else is a real failure; do not advance
+        return stored
 
     # ── clean up ──────────────────────────────────────────────────────────────
     def prune_archives(self, keep_days: int = 2) -> tuple[int, int]:
