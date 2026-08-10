@@ -1025,41 +1025,91 @@ def _on_dialogue(app: AppState, evt):
     threading.Thread(target=process, daemon=True).start()
 
 
-# ── System tray ───────────────────────────────────────────────────────────────
+# ── System tray: REMOVED 2026-08-09 ───────────────────────────────────────────
+#
+# `_build_tray()` used to live here and put a Gnoll Guard icon in the notification area
+# with a Show/Quit menu. It is gone at the owner's instruction — see the note at its
+# former call site in main(). Gnoll Guard is a normal window now: it opens, it stays on
+# the taskbar, and the X button closes it.
+#
+# If it is ever reinstated, the thing that made it a problem was not the icon by itself,
+# it was that closing the window HID the app behind that icon. Do not bring back
+# hide-on-close.
 
-def _build_tray(app: AppState):
+
+def _force_window_visible(win):
+    r"""Make absolutely sure the main window is on screen. This is the "it didn't even
+    open" bug, root-caused 2026-08-09.
+
+    🔴 CUSTOMTKINTER REFUSES TO SHOW A WINDOW THAT WAS WITHDRAWN BEFORE IT EXISTED.
+        We call `win.withdraw()` right after building MainWindow so it does not flash up
+        behind the boot splash. CustomTkinter's CTk overrides withdraw (ctk_tk.py:133):
+
+            def withdraw(self):
+                self._withdraw_called_before_window_exists = True
+                super().withdraw()
+
+        and its mainloop (ctk_tk.py:159) then does:
+
+            if not self._withdraw_called_before_window_exists ...:
+                self.deiconify()
+
+        Reading that flag as "the app wants this window hidden", it skips the deiconify.
+        A plain `win.deiconify()` beforehand does NOT clear the flag — CTk does not
+        override deiconify — so the app boots fully, logs "GnollGuard started", runs the
+        log watcher, and presents NO WINDOW. Users reported this as the app not opening.
+        They were right, and it had nothing to do with the tray.
+
+        Confirmed on 1.5.20 and 1.5.21 alike: the main TkTopLevel sits at 916x689 with
+        showCmd=SW_SHOWNORMAL and not iconic, but WS_VISIBLE unset — the signature of a
+        withdraw that was never undone. It is timing-dependent, which is why it looked
+        random and only some users hit it.
+
+    Two layers, deliberately:
+      1. clear the flag so CTk's own mainloop deiconify is allowed to run
+      2. re-assert shortly after the mainloop starts, because CTk ALSO withdraws and
+         restores the window when it sets the titlebar colour (ctk_tk.py:278), and that
+         runs on a timer after we are gone from this function
+
+    ⚠ Layer 2 is the one that must not be removed. Layer 1 touches a private attribute
+    and will silently stop working if CustomTkinter renames it; layer 2 asks the window
+    what state it is actually in and cannot go stale."""
     try:
-        import pystray
-        from PIL import Image, ImageDraw
+        win._withdraw_called_before_window_exists = False
+        win._iconify_called_before_window_exists = False
+    except Exception:
+        pass
 
-        icon_path = os.path.join(
-            getattr(sys, "_MEIPASS",
-                    os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
-            "assets", "tray_icon.png",
-        )
-        if os.path.isfile(icon_path):
-            image = Image.open(icon_path)
-        else:
-            image = Image.new("RGBA", (64, 64), "#0D0A0B")
-            draw = ImageDraw.Draw(image)
-            draw.ellipse([8, 8, 56, 56], fill="#C8960C")
-            draw.text((20, 20), "GL", fill="#0D0A0B")
+    def _show():
+        try:
+            # state("normal") covers BOTH failure modes in one call: "withdrawn" (the CTk
+            # flag bug) and "iconic" (minimised). ⚠ deiconify() alone is not enough — with
+            # the flag cleared, the window came back as iconic at (-32000,-32000), which is
+            # still no window as far as the user is concerned.
+            if win.state() != "normal":
+                win.state("normal")
+            win.lift()
+        except Exception:
+            log.debug("could not force the window visible", exc_info=True)
+            # Last resort: ask Windows directly. Tk can be wedged while the HWND is fine.
+            try:
+                import ctypes
+                hwnd = ctypes.windll.user32.FindWindowW(None, win.title())
+                if hwnd:
+                    ctypes.windll.user32.ShowWindow(hwnd, 9)      # SW_RESTORE
+            except Exception:
+                pass
 
-        def show_window(icon, item):
-            app.main_window.safe_after(0, app.main_window.deiconify)
-
-        def quit_app(icon, item):
-            icon.stop()
-            app.main_window.safe_after(0, _shutdown(app))
-
-        menu = pystray.Menu(
-            pystray.MenuItem("Show Gnoll Guard", show_window, default=True),
-            pystray.MenuItem("Quit", quit_app),
-        )
-        tray = pystray.Icon("GnollGuard", image, "Gnoll Guard", menu)
-        tray.run()
-    except Exception as e:
-        log.error("System tray failed: %s", e)
+    _show()
+    # CustomTkinter withdraws and restores the window again when it sets the titlebar
+    # colour (ctk_tk.py:278), on its own timers — so one call here is not enough. These
+    # re-assert over the first few seconds and then stop, so a user who deliberately
+    # minimises later is left alone.
+    for delay in (300, 1200, 2500, 4000):
+        try:
+            win.after(delay, _show)
+        except Exception:
+            pass
 
 
 def _shutdown(app: AppState):
@@ -1569,8 +1619,19 @@ def main():
     # to the window instead of having main_window import main — that would be a cycle.
     app.shutdown = lambda: win.safe_after(0, _shutdown(app))
 
-    # Start tray in background thread
-    threading.Thread(target=lambda: _build_tray(app), daemon=True, name="SysTray").start()
+    # 🛑 NO SYSTEM TRAY. Owner, 2026-08-09, twice: *"i dont want the journal minizing to
+    # the mini taskbar again its confusing users"* and then, on seeing the icon still
+    # there in 1.5.21, *"can you tell me why its going to my mini task bar again?"*
+    #
+    # 1.5.21 removed the hide-to-tray BEHAVIOUR but kept the icon, and that was the wrong
+    # call: an icon sitting in the tray still tells the user the app went somewhere. The
+    # menu was meaningless anyway once X quits — "Show Gnoll Guard" does nothing when the
+    # window is always up, and "Quit" duplicates the X button.
+    #
+    # ⚠ Removing it is only safe because _force_window_visible() now guarantees the
+    # window actually appears. Without that, a user hitting the CustomTkinter
+    # withdraw bug would have no window AND no tray icon — a running process with no way
+    # to reach it. Do not remove that guarantee while this stays gone.
 
     # Everything is wired — swap the boot splash for the real window.
     try:
@@ -1583,7 +1644,7 @@ def main():
         _tk._default_root = win
     except Exception:
         pass
-    win.deiconify()
+    _force_window_visible(win)
 
     log.info("GnollGuard started")
     win.mainloop()
