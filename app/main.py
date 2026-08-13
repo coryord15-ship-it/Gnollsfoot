@@ -1025,16 +1025,159 @@ def _on_dialogue(app: AppState, evt):
     threading.Thread(target=process, daemon=True).start()
 
 
-# ── System tray: REMOVED 2026-08-09 ───────────────────────────────────────────
+# ── System tray: OPT-IN ONLY ────────────────────────────────────────
 #
-# `_build_tray()` used to live here and put a Gnoll Guard icon in the notification area
-# with a Show/Quit menu. It is gone at the owner's instruction — see the note at its
-# former call site in main(). Gnoll Guard is a normal window now: it opens, it stays on
-# the taskbar, and the X button closes it.
+# HISTORY, READ IT BEFORE CHANGING ANY OF THIS.
 #
-# If it is ever reinstated, the thing that made it a problem was not the icon by itself,
-# it was that closing the window HID the app behind that icon. Do not bring back
-# hide-on-close.
+# The tray was REMOVED 2026-08-09 after the owner objected twice: *"i dont want the journal
+# minizing to the mini taskbar again its confusing users"* and, on seeing the icon still
+# present in 1.5.21, *"can you tell me why its going to my mini task bar again?"*.
+#
+# It came back 2026-08-12 on a user request, and the owner approved it with one condition:
+# *"the tray request is okay as long as its an option and not default."*
+#
+# 🔴 SO THE RULES ARE NOT NEGOTIABLE:
+#   1. `minimize_to_tray` defaults to FALSE. A fresh install behaves exactly as it does
+#      today: X quits, and NO icon ever appears in the notification area.
+#   2. When the setting is off there is no icon AT ALL. 1.5.21 removed the hide-on-close
+#      behaviour but left the icon, and the owner correctly called that out — an icon in the
+#      tray still tells the user the app went somewhere.
+#   3. The icon is created lazily, only once someone turns the setting on.
+#
+# WHY IT IS SAFE NOW, WHEN IT WAS NOT BEFORE. The original bug was not the icon; it was that
+# X hid the window and the user could not get it back. Two separate defects caused that and
+# BOTH are fixed:
+#   * `_find_main_window()` matched the title exactly ("Gnoll Guard") while the real title
+#     carries a version ("Gnoll Guard v1.5.13"), so relaunching never re-showed the hidden
+#     window — it showed a message box. It now enumerates and prefix-matches.
+#   * `_force_window_visible()` defeats the CustomTkinter withdraw bug that could leave the
+#     app running with no window on a COLD start.
+# ⚠ Do not weaken either of those while this feature exists, or hiding becomes a trap again.
+
+
+class TrayIcon:
+    """Notification-area icon, started and stopped on demand.
+
+    pystray's `run()` blocks, so it owns a daemon thread. Stopping is best-effort: the
+    icon may already be gone if the user quit from its own menu.
+    """
+
+    def __init__(self, app):
+        self._app = app
+        self._icon = None
+        self._thread = None
+
+    @property
+    def running(self) -> bool:
+        return self._thread is not None and self._thread.is_alive()
+
+    def start(self):
+        if self.running:
+            return
+        self._thread = threading.Thread(target=self._run, daemon=True, name="tray")
+        self._thread.start()
+
+    def stop(self):
+        icon, self._icon = self._icon, None
+        self._thread = None
+        if icon is not None:
+            try:
+                icon.stop()
+            except Exception:
+                log.debug("tray stop failed", exc_info=True)
+
+    def _run(self):
+        try:
+            import pystray
+            from PIL import Image, ImageDraw
+
+            icon_path = os.path.join(
+                getattr(sys, "_MEIPASS",
+                        os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+                "assets", "tray_icon.png",
+            )
+            if os.path.isfile(icon_path):
+                image = Image.open(icon_path)
+            else:
+                # Drawn fallback so a missing asset degrades to a plain icon rather than
+                # to NO icon — which, with the setting on, would strand a hidden window.
+                image = Image.new("RGBA", (64, 64), "#0D0A0B")
+                draw = ImageDraw.Draw(image)
+                draw.ellipse([8, 8, 56, 56], fill="#C8960C")
+                draw.text((20, 20), "GG", fill="#0D0A0B")
+
+            def show_window(icon, item):
+                restore_main_window(self._app)
+
+            def quit_app(icon, item):
+                icon.stop()
+                win = getattr(self._app, "main_window", None)
+                if win is not None:
+                    win.safe_after(0, _shutdown(self._app))
+
+            menu = pystray.Menu(
+                pystray.MenuItem("Show Gnoll Guard", show_window, default=True),
+                pystray.MenuItem("Quit", quit_app),
+            )
+            self._icon = pystray.Icon("GnollGuard", image, "Gnoll Guard", menu)
+            self._icon.run()
+        except Exception as e:
+            log.error("System tray failed: %s", e)
+            # ⚠ If the icon cannot start, the window must NOT stay hidden — that is the
+            # exact "running process the user cannot reach" failure this guards against.
+            try:
+                restore_main_window(self._app)
+            except Exception:
+                log.debug("failed to restore window after tray failure", exc_info=True)
+
+
+def restore_main_window(app):
+    """Bring the main window back, from any thread.
+
+    Always goes through `safe_after` so the Tk call happens on the Tk thread; pystray
+    menu callbacks run on the tray's own thread and touching Tk from there is undefined.
+    """
+    win = getattr(app, "main_window", None)
+    if win is None:
+        return
+
+    def _do():
+        try:
+            win.deiconify()
+            win.lift()
+            win.focus_force()
+        except Exception:
+            log.debug("deiconify failed", exc_info=True)
+
+    try:
+        win.safe_after(0, _do)
+    except Exception:
+        log.debug("safe_after failed during restore", exc_info=True)
+
+
+def tray_enabled(app) -> bool:
+    """Opt-in, and the default is OFF. Anything unparseable reads as OFF on purpose —
+    a corrupt config must not silently start hiding the window."""
+    try:
+        return bool(app.config.get("minimize_to_tray", False))
+    except Exception:
+        return False
+
+
+def apply_tray_setting(app):
+    """Start or stop the icon to match the setting. Safe to call repeatedly.
+
+    🔴 Turning the setting OFF while the window is hidden MUST un-hide it, or the user
+    has just removed the only way back to their own app.
+    """
+    tray = getattr(app, "tray", None)
+    if tray is None:
+        tray = app.tray = TrayIcon(app)
+    if tray_enabled(app):
+        tray.start()
+    else:
+        tray.stop()
+        restore_main_window(app)
 
 
 def _force_window_visible(win):
@@ -1619,19 +1762,16 @@ def main():
     # to the window instead of having main_window import main — that would be a cycle.
     app.shutdown = lambda: win.safe_after(0, _shutdown(app))
 
-    # 🛑 NO SYSTEM TRAY. Owner, 2026-08-09, twice: *"i dont want the journal minizing to
-    # the mini taskbar again its confusing users"* and then, on seeing the icon still
-    # there in 1.5.21, *"can you tell me why its going to my mini task bar again?"*
+    # ── Optional system tray ───────────────────────────────────────────
     #
-    # 1.5.21 removed the hide-to-tray BEHAVIOUR but kept the icon, and that was the wrong
-    # call: an icon sitting in the tray still tells the user the app went somewhere. The
-    # menu was meaningless anyway once X quits — "Show Gnoll Guard" does nothing when the
-    # window is always up, and "Quit" duplicates the X button.
-    #
-    # ⚠ Removing it is only safe because _force_window_visible() now guarantees the
-    # window actually appears. Without that, a user hitting the CustomTkinter
-    # withdraw bug would have no window AND no tray icon — a running process with no way
-    # to reach it. Do not remove that guarantee while this stays gone.
+    # OFF unless the user asked for it — owner, 2026-08-12: "the tray request is okay as
+    # long as its an option and not default". apply_tray_setting() is a no-op when the
+    # setting is false, so a default install never creates an icon. See TrayIcon above for
+    # the full history and why hiding is safe now when it was not in 1.5.21.
+    try:
+        apply_tray_setting(app)
+    except Exception:
+        log.exception("tray setup failed; continuing without it")
 
     # Everything is wired — swap the boot splash for the real window.
     try:

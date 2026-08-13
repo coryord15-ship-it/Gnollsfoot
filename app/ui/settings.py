@@ -291,6 +291,33 @@ class SettingsTab(ctk.CTkFrame):
             value=self._app.config.get("export_directory", "")
         )
 
+        # ── Window behaviour ─────────────────────────────────────────────────
+        #
+        # Owner, 2026-08-12: *"the tray request is okay as long as its an option and not
+        # default"*. DEFAULT FALSE, and the label says plainly where the app goes — the
+        # original complaint was that users could not find it after it vanished.
+        self._section(scroll, "Window")
+        self._tray_var = ctk.BooleanVar(
+            value=bool(self._app.config.get("minimize_to_tray", False))
+        )
+        ctk.CTkSwitch(
+            scroll,
+            text="Minimise to the system tray instead of quitting",
+            variable=self._tray_var,
+            command=self._toggle_tray,
+            font=theme.FONT_BODY, text_color=theme.TEXT_PRIMARY,
+            progress_color=theme.GOLD,
+        ).pack(anchor="w", pady=(0, theme.PAD_SM))
+        ctk.CTkLabel(
+            scroll,
+            text="Off by default. When on, the X button hides Gnoll Guard to the "
+                 "notification area (bottom-right, next to the clock) and it keeps "
+                 "logging — click the icon there to bring it back, or use Quit on its "
+                 "menu to close it properly.",
+            font=theme.FONT_BODY_SMALL, text_color=theme.TEXT_MUTED, anchor="w",
+            wraplength=700, justify="left",
+        ).pack(anchor="w", pady=(0, theme.PAD))
+
         self._section(scroll, "Community")
         ctk.CTkLabel(
             scroll,
@@ -561,6 +588,25 @@ class SettingsTab(ctk.CTkFrame):
             parent, text=title,
             font=theme.FONT_SUBHEADER, text_color=theme.GOLD, anchor="w",
         ).pack(anchor="w", pady=(theme.PAD, theme.PAD_SM))
+
+    def _toggle_tray(self):
+        """Persist immediately and apply live — no Save button round-trip.
+
+        🔴 Turning it OFF must also un-hide the window. If the user is toggling this
+        from a hidden state they have just removed their only way back to the app;
+        apply_tray_setting() restores it. Do not "optimise" that call away.
+        """
+        try:
+            self._app.config["minimize_to_tray"] = bool(self._tray_var.get())
+            self._app.save_config()
+        except Exception:
+            log.exception("could not save minimize_to_tray")
+            return
+        try:
+            from app.main import apply_tray_setting
+            apply_tray_setting(self._app)
+        except Exception:
+            log.exception("could not apply tray setting")
 
     def _toggle_overlay(self):
         # No dock hub anymore — opacity/typography apply to open pop-outs only.

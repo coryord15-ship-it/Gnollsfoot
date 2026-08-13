@@ -1154,6 +1154,25 @@ class MainWindow(ctk.CTk):
         ⚠ Go through the app's real shutdown, not `destroy()`. It flushes queued quest
         sightings and stops the log watcher and rotator; skipping it drops whatever the
         session had not uploaded yet."""
+        # ── Opt-in: hide to the tray instead of quitting ─────────────────────────
+        #
+        # Added 2026-08-12 on a user request, approved by the owner with one condition:
+        # *"the tray request is okay as long as its an option and not default"*. So this
+        # branch is dead code on a default install and everything above still applies.
+        #
+        # 🔴 HIDE ONLY IF THE ICON IS ACTUALLY RUNNING. Withdrawing the window when the
+        # tray failed to start would recreate the exact bug described above — a live
+        # process with no window and nothing to click. If the icon is not up, fall through
+        # and quit for real, which is the behaviour the user already understands.
+        try:
+            from app.main import tray_enabled
+            tray = getattr(self._app, "tray", None)
+            if tray_enabled(self._app) and tray is not None and tray.running:
+                self.withdraw()
+                return
+        except Exception:
+            log.debug("tray-on-close check failed; quitting normally", exc_info=True)
+
         quit_app = getattr(self._app, "shutdown", None)
         if callable(quit_app):
             quit_app()
