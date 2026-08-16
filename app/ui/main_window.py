@@ -15,6 +15,7 @@ from PIL import Image
 
 from app.ui import theme
 from app.ui import journal_view
+from app.ui import notify          # alert sound + taskbar flash
 from app.ui.settings import SettingsTab
 
 
@@ -261,8 +262,66 @@ class MainWindow(ctk.CTk):
         self._alerts_scroll.pack(fill="both", expand=True, padx=theme.PAD)
         self._alert_rows: list = []
 
+    # ── Getting the player's attention ───────────────────────────────────────
+    #
+    # Owner, 2026-08-16: *"if we are going to alart the person its there we need some
+    # kinda alart sound plus a blinking taskbar/alart tab indicating theres an alart in
+    # this window (the taskbar) and on this section of the app (alart window tab)."*
+    #
+    # The player is in-game and full-screen. A row quietly appearing in a list behind
+    # the game is not an alert, so this adds the two channels that actually reach them:
+    # a sound, and a flashing taskbar button. The nav badge is for when they alt-tab
+    # back and need to see WHERE the new thing is.
+    def _notify_new_alert(self):
+        """Sound + taskbar flash + unread badge. Never raises."""
+        try:
+            self._unread_alerts = getattr(self, "_unread_alerts", 0) + 1
+            self._update_alert_badge()
+
+            # 🔴 Do NOT shout if they are already looking at it. Window focused AND the
+            # Alerts section open means the row appearing IS the notification; beeping
+            # at someone who is watching is how a feature gets turned off for good.
+            looking = (notify.window_has_focus(self)
+                       and self._active_section == "Recent Alerts")
+            if looking:
+                self._unread_alerts = 0
+                self._update_alert_badge()
+                return
+
+            if bool(self._app.config.get("alert_sound", True)):
+                notify.play_alert_sound(self._app.config.get("alert_volume", 70))
+            if bool(self._app.config.get("alert_flash", True)):
+                notify.flash_taskbar(self)
+            # Opt-in, default OFF: an overlay drawn over the game uninvited is the most
+            # intrusive thing this app can do. Only reached when they switched it on.
+            if bool(self._app.config.get("alert_toast", False)):
+                notify.show_toast(
+                    self, alert.title, alert.body,
+                    seconds=int(self._app.config.get("alert_toast_secs", 5)),
+                    color=getattr(alert, "color", theme.GOLD),
+                )
+        except Exception:
+            log.debug("alert notification failed", exc_info=True)
+
+    def _update_alert_badge(self):
+        """Show the unread count on the Alerts nav button, e.g. '🔔 Alerts (3)'."""
+        try:
+            btn = self._nav_buttons.get("Recent Alerts")
+            if btn is None:
+                return
+            n = getattr(self, "_unread_alerts", 0)
+            if n:
+                btn.configure(text=f"   🔔   Alerts  ({n})", text_color=theme.GOLD)
+            else:
+                active = (self._active_section == "Recent Alerts")
+                btn.configure(text="   🔔   Alerts",
+                              text_color=theme.GOLD if active else theme.TEXT_SECONDARY)
+        except Exception:
+            log.debug("alert badge update failed", exc_info=True)
+
     def add_alert_row(self, alert, on_verify=None):
         """Called from the main thread when a new alert fires."""
+        self._notify_new_alert()
         row = ctk.CTkFrame(
             self._alerts_scroll, fg_color=theme.PANEL,
             corner_radius=theme.RADIUS, border_width=1,
@@ -359,6 +418,13 @@ class MainWindow(ctk.CTk):
                 btn.configure(fg_color=theme.PANEL_HOVER, text_color=theme.GOLD)
             else:
                 btn.configure(fg_color="transparent", text_color=theme.TEXT_SECONDARY)
+        # Opening Alerts IS acknowledging them: drop the unread count and stop the
+        # taskbar flashing. Leaving either running after the user has looked is the
+        # fastest way to teach them the indicator means nothing.
+        if key == "Recent Alerts":
+            self._unread_alerts = 0
+            self._update_alert_badge()
+            notify.stop_flashing(self)
         if key == "Quest Journal":
             self._refresh_active_journal()
         elif key == "Settings":

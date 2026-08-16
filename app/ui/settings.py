@@ -291,6 +291,104 @@ class SettingsTab(ctk.CTkFrame):
             value=self._app.config.get("export_directory", "")
         )
 
+        # ── Alerts ───────────────────────────────────────────────────────────
+        #
+        # Owner, 2026-08-16: *"if we are going to alart the person its there we need
+        # some kinda alart sound plus a blinking taskbar"*, and then *"let them turn the
+        # sound up or down via a slider and give them the option to turn the sound off"*.
+        #
+        # Sound and flash both default ON — unlike the tray, these were asked for. The
+        # player is in-game and full-screen; a row appearing in a list behind the game
+        # is not an alert. But both are switchable, and the slider goes to 0.
+        self._section(scroll, "Alerts")
+
+        self._alert_sound_var = ctk.BooleanVar(
+            value=bool(self._app.config.get("alert_sound", True))
+        )
+        ctk.CTkSwitch(
+            scroll,
+            text="Play a sound when a quest item drops",
+            variable=self._alert_sound_var,
+            command=self._save_alert_prefs,
+            font=theme.FONT_BODY, text_color=theme.TEXT_PRIMARY,
+            progress_color=theme.GOLD,
+        ).pack(anchor="w", pady=(0, theme.PAD_SM))
+
+        vol_row = ctk.CTkFrame(scroll, fg_color="transparent")
+        vol_row.pack(fill="x", pady=(0, theme.PAD_SM))
+        ctk.CTkLabel(
+            vol_row, text="Volume", font=theme.FONT_BODY,
+            text_color=theme.TEXT_PRIMARY, anchor="w", width=70,
+        ).pack(side="left")
+
+        self._alert_volume_var = ctk.IntVar(
+            value=int(self._app.config.get("alert_volume", 70))
+        )
+        self._alert_volume_label = ctk.CTkLabel(
+            vol_row, text=f"{self._alert_volume_var.get()}%",
+            font=theme.FONT_BODY_SMALL, text_color=theme.TEXT_SECONDARY, width=44,
+        )
+        ctk.CTkSlider(
+            vol_row, from_=0, to=100, number_of_steps=20,
+            variable=self._alert_volume_var,
+            command=self._on_alert_volume,
+            progress_color=theme.GOLD, button_color=theme.GOLD, width=220,
+        ).pack(side="left", padx=(0, theme.PAD_SM))
+        self._alert_volume_label.pack(side="left")
+
+        # A volume slider you cannot hear while dragging is a guess. This plays the
+        # real chime at the real level, so the setting is chosen rather than estimated.
+        ctk.CTkButton(
+            vol_row, text="Test", width=64, height=26,
+            command=self._test_alert_sound,
+            fg_color=theme.PANEL_HOVER, hover_color=theme.GOLD,
+            text_color=theme.TEXT_PRIMARY, font=theme.FONT_BODY_SMALL,
+        ).pack(side="left", padx=(theme.PAD_SM, 0))
+
+        self._alert_flash_var = ctk.BooleanVar(
+            value=bool(self._app.config.get("alert_flash", True))
+        )
+        ctk.CTkSwitch(
+            scroll,
+            text="Flash the taskbar button until you look at the alert",
+            variable=self._alert_flash_var,
+            command=self._save_alert_prefs,
+            font=theme.FONT_BODY, text_color=theme.TEXT_PRIMARY,
+            progress_color=theme.GOLD,
+        ).pack(anchor="w", pady=(0, theme.PAD_SM))
+
+        # 🔴 DEFAULT OFF — owner asked for it as opt-in. An overlay that draws itself
+        # over the game uninvited is the single most intrusive thing this app could do,
+        # and the tray episode already showed what happens when something appears
+        # without being asked for.
+        self._alert_toast_var = ctk.BooleanVar(
+            value=bool(self._app.config.get("alert_toast", False))
+        )
+        toast_row = ctk.CTkFrame(scroll, fg_color="transparent")
+        toast_row.pack(fill="x", pady=(0, 2))
+        ctk.CTkSwitch(
+            toast_row,
+            text="Show a 5-second pop-up over the game when a quest item drops",
+            variable=self._alert_toast_var,
+            command=self._save_alert_prefs,
+            font=theme.FONT_BODY, text_color=theme.TEXT_PRIMARY,
+            progress_color=theme.GOLD,
+        ).pack(side="left")
+        ctk.CTkButton(
+            toast_row, text="Test", width=64, height=26,
+            command=self._test_alert_toast,
+            fg_color=theme.PANEL_HOVER, hover_color=theme.GOLD,
+            text_color=theme.TEXT_PRIMARY, font=theme.FONT_BODY_SMALL,
+        ).pack(side="left", padx=(theme.PAD_SM, 0))
+        ctk.CTkLabel(
+            scroll,
+            text=("Appears on the monitor EverQuest is on, and never takes focus.\n"
+                  "⚠ If you run the game in exclusive full-screen, Windows will not draw "
+                  "anything over it — use borderless/windowed, or rely on the sound."),
+            font=theme.FONT_BODY_SMALL, text_color=theme.TEXT_SECONDARY,
+            anchor="w", justify="left", wraplength=560,
+        ).pack(anchor="w", pady=(0, theme.PAD_SM))
+
         # ── Window behaviour ─────────────────────────────────────────────────
         #
         # Owner, 2026-08-12: *"the tray request is okay as long as its an option and not
@@ -588,6 +686,51 @@ class SettingsTab(ctk.CTkFrame):
             parent, text=title,
             font=theme.FONT_SUBHEADER, text_color=theme.GOLD, anchor="w",
         ).pack(anchor="w", pady=(theme.PAD, theme.PAD_SM))
+
+    # ── Alert preferences ────────────────────────────────────────────────────
+
+    def _save_alert_prefs(self):
+        """Persist immediately — these are toggles, not a form with a Save button."""
+        try:
+            self._app.config["alert_sound"] = bool(self._alert_sound_var.get())
+            self._app.config["alert_flash"] = bool(self._alert_flash_var.get())
+            self._app.config["alert_volume"] = int(self._alert_volume_var.get())
+            self._app.config["alert_toast"] = bool(self._alert_toast_var.get())
+            self._app.save_config()
+        except Exception:
+            log.exception("could not save alert preferences")
+
+    def _on_alert_volume(self, value):
+        """Live label + persist. No preview here — dragging a slider that chirps on
+        every step is maddening; that is what the Test button is for."""
+        try:
+            v = int(float(value))
+            self._alert_volume_label.configure(text=f"{v}%")
+            self._app.config["alert_volume"] = v
+            self._app.save_config()
+        except Exception:
+            log.debug("alert volume update failed", exc_info=True)
+
+    def _test_alert_sound(self):
+        """Play the real chime at the real level, so the slider is a choice not a guess."""
+        try:
+            from app.ui import notify
+            notify.play_alert_sound(int(self._alert_volume_var.get()))
+        except Exception:
+            log.debug("alert sound test failed", exc_info=True)
+
+    def _test_alert_toast(self):
+        """Show the actual overlay, on the actual monitor it would use."""
+        try:
+            from app.ui import notify
+            notify.show_toast(
+                self.winfo_toplevel(),
+                "Quest item: Divine Honeycomb",
+                "This is where a quest-item alert will appear.",
+                seconds=int(self._app.config.get("alert_toast_secs", 10)),
+            )
+        except Exception:
+            log.exception("toast test failed")
 
     def _toggle_tray(self):
         """Persist immediately and apply live — no Save button round-trip.
