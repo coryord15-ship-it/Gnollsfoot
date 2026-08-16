@@ -5,9 +5,60 @@ Build with: pyinstaller GnollGuard.spec
 """
 
 import os
+import re
 from PyInstaller.utils.hooks import collect_all, collect_data_files
 
 block_cipher = None
+
+# ── Embed a REAL Windows version resource ────────────────────────────────────
+#
+# 🔴 Until 2026-08-16 this spec passed `version_file=None`, so no GnollGuard.exe we
+# have ever shipped carried a version resource. `(Get-Item gg.exe).VersionInfo
+# .ProductVersion` returned an EMPTY STRING for every build.
+#
+# That matters more than it sounds. After v1.5.15 and v1.5.16 both shipped the wrong
+# binary under the right tag, CLAUDE.md added exactly that command as the guard that
+# would catch it happening again — and the guard could never have worked. It reported
+# empty for a correct build and for a wrong build alike. v1.5.23 was very nearly
+# advertised on the strength of a check that cannot fail or pass.
+#
+# The version is READ FROM app/version.py at build time, never typed here. A literal
+# in this file would just be a second place to forget, which is the whole failure mode
+# we are trying to close.
+_ver_src = open(os.path.join('app', 'version.py'), encoding='utf-8').read()
+_VERSION = re.search(r'__version__\s*=\s*["\']([^"\']+)["\']', _ver_src).group(1)
+_parts = [int(x) for x in _VERSION.split('.')]
+while len(_parts) < 4:            # Windows VERSIONINFO is always a 4-tuple
+    _parts.append(0)
+_VTUPLE = tuple(_parts[:4])
+
+_VERSION_FILE = os.path.join('build', 'file_version_info.txt')
+os.makedirs('build', exist_ok=True)
+with open(_VERSION_FILE, 'w', encoding='utf-8') as _fh:
+    _fh.write(f"""VSVersionInfo(
+  ffi=FixedFileInfo(
+    filevers={_VTUPLE},
+    prodvers={_VTUPLE},
+    mask=0x3f, flags=0x0, OS=0x40004, fileType=0x1, subtype=0x0,
+    date=(0, 0)
+  ),
+  kids=[
+    StringFileInfo([
+      StringTable('040904B0', [
+        StringStruct('CompanyName', 'Gnoll Guard'),
+        StringStruct('FileDescription', 'Gnoll Guard - EverQuest Legends companion'),
+        StringStruct('FileVersion', '{_VERSION}'),
+        StringStruct('InternalName', 'GnollGuard'),
+        StringStruct('OriginalFilename', 'GnollGuard.exe'),
+        StringStruct('ProductName', 'Gnoll Guard'),
+        StringStruct('ProductVersion', '{_VERSION}')
+      ])
+    ]),
+    VarFileInfo([VarStruct('Translation', [1033, 1200])])
+  ]
+)
+""")
+print(f"[spec] embedding version resource {_VERSION} {_VTUPLE}")
 
 # CustomTkinter ships theme JSON + assets that must be bundled or the app
 # crashes at launch. collect_all grabs its data, binaries, and submodules.
@@ -86,5 +137,5 @@ exe = EXE(
     codesign_identity=None,
     entitlements_file=None,
     icon='assets/icon.ico',
-    version_file=None,
+    version_file=_VERSION_FILE,   # generated above FROM app/version.py — never hand-edited
 )
