@@ -137,5 +137,11 @@ exe = EXE(
     codesign_identity=None,
     entitlements_file=None,
     icon='assets/icon.ico',
-    version_file=_VERSION_FILE,   # generated above FROM app/version.py — never hand-edited
+    # 🔴 The kwarg is `version`, NOT `version_file`. PyInstaller's EXE() swallows unknown
+    # kwargs without a word, so `version_file=None` sat here for the life of the project
+    # looking exactly like a deliberate switch and doing absolutely nothing. Renaming it
+    # to `version_file=<path>` produced a build that printed "embedding version resource"
+    # and still shipped an empty ProductVersion. Verified against the real signature:
+    # PyInstaller reads 'version'; 'version_file' is not in the list it ever looks at.
+    version=_VERSION_FILE,   # generated above FROM app/version.py — never hand-edited
 )
