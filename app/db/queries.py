@@ -121,6 +121,8 @@ def log_loot_event(
     character_name: Optional[str] = None,
     zone: Optional[str] = None,
     game_time: Optional[str] = None,
+    quantity: int = 1,
+    tier: int = 0,
 ):
     with _write_lock:
         evt = LootEvent(
@@ -128,6 +130,8 @@ def log_loot_event(
             character_name=character_name,
             zone=zone,
             game_time=game_time,
+            quantity=quantity or 1,
+            tier=tier or 0,
         )
         session.add(evt)
         session.commit()

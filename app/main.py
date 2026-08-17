@@ -640,9 +640,14 @@ def _on_loot(app: AppState, loot_evt):
     npc_name = getattr(loot_evt, "npc_name", "") or ""
     log.info("Loot event: %s (mob: %s)", item_name, npc_name or "unknown")
 
-    # Always record the loot (quest-hint matching + Items tracking); pruned to 24 h
+    # Always record the loot (quest-hint matching + Items tracking); pruned to 24 h.
+    # quantity/tier come off the parsed event — item_name is the BASE name now, so
+    # "2 Bone Chips" stores as ("Bone Chips", qty 2) and actually matches the item table.
+    _qty = int(getattr(loot_evt, "quantity", 1) or 1)
+    _tier = int(getattr(loot_evt, "tier", 0) or 0)
     threading.Thread(
-        target=lambda: log_loot_event(app.db_session, item_name),
+        target=lambda: log_loot_event(app.db_session, item_name,
+                                      quantity=_qty, tier=_tier),
         daemon=True,
     ).start()
 

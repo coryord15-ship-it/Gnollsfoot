@@ -65,11 +65,16 @@ class LootEvent(Base):
     __tablename__ = "loot_events"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    item_name = Column(Text, nullable=False)
+    item_name = Column(Text, nullable=False)      # BASE name — no stack count, no +N
     character_name = Column(Text)
     zone = Column(Text)
     game_time = Column(Text)
     real_timestamp = Column(DateTime, default=datetime.utcnow)
+    # The loot line's stack count and tier used to be parsed and thrown away, which left
+    # them stuck in item_name ("2 Bone Chips") where they orphaned the row against every
+    # item table. They are real data and now have somewhere to live.
+    quantity = Column(Integer, nullable=False, default=1, server_default="1")
+    tier = Column(Integer, nullable=False, default=0, server_default="0")
 
 
 def _migrate_schema(engine):
@@ -86,6 +91,21 @@ def _migrate_schema(engine):
                 ))
                 conn.commit()
                 log.info("DB migration: added items.item_level column")
+            # loot_events gained quantity/tier when the stack count stopped being
+            # left inside item_name. Existing installs have the table already, so
+            # create_all() will not add them.
+            lcols = [
+                row[1]
+                for row in conn.execute(text("PRAGMA table_info(loot_events)")).fetchall()
+            ]
+            for col, decl in (("quantity", "INTEGER NOT NULL DEFAULT 1"),
+                              ("tier", "INTEGER NOT NULL DEFAULT 0")):
+                if col not in lcols:
+                    conn.execute(text(
+                        "ALTER TABLE loot_events ADD COLUMN %s %s" % (col, decl)
+                    ))
+                    conn.commit()
+                    log.info("DB migration: added loot_events.%s column", col)
         except Exception as exc:
             log.warning("DB migration failed: %s", exc)
 
