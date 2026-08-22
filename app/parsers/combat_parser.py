@@ -236,6 +236,9 @@ class Fight:
         return a
 
 
+_ARTICLE = re.compile(r"^(A|An|The) ")
+
+
 def canon_actor(name: str) -> str:
     """Collapse the player's self-reference to one canonical actor.
 
@@ -251,7 +254,24 @@ def canon_actor(name: str) -> str:
     Nagafen" - scored as our own side. This is the same class of failure the heal-graph
     version had; attack-direction resolution is only as good as knowing who "we" are.
     """
-    return "You" if name.strip().lower() == "you" else name
+    n = name.strip()
+    if n.lower() == "you":
+        return "You"
+    # 🔴 SECOND CASING SPLIT, same class, one level up. EQ capitalises a mob when it
+    # is the SUBJECT of the sentence and lowercases it as the OBJECT:
+    #     "You slash a fetid fiend ..."      -> "a fetid fiend"
+    #     "A fetid fiend hits YOU ..."       -> "A fetid fiend"
+    # Those are one mob. Measured on the owner's log: 84 names appear in BOTH casings
+    # inside a single fight ("a pledge familiar" in 60 fights), which splits one actor
+    # into two - halving its damage and its damage-taken - and breaks charm lookups,
+    # because self.charmed stores whichever casing the charm-landing line happened to use.
+    #
+    # Only the leading ARTICLE is folded. EQ mob names begin with "a"/"an"/"the"; player
+    # names do not, so "Wakeblade" is never touched and no two players can collide.
+    m = _ARTICLE.match(n)
+    if m:
+        n = m.group(1).lower() + n[len(m.group(1)):]
+    return n
 
 
 def parse_ts(s: str) -> float:
@@ -434,7 +454,7 @@ class LogParser:
         if m and self._pending_charm:
             dst = m.group("dst") or m.group("dst2")
             if dst:
-                self.charmed[dst] = self._pending_charm
+                self.charmed[canon_actor(dst)] = self._pending_charm
                 self.friendly.add(dst)
             self._pending_charm = ""
             return
@@ -442,8 +462,8 @@ class LogParser:
         if m:
             dst = m.groupdict().get("dst")
             if dst:
-                self.charmed.pop(dst, None)
-                self.friendly.discard(dst)
+                self.charmed.pop(canon_actor(dst), None)
+                self.friendly.discard(canon_actor(dst))
             else:
                 # "Your charm spell has worn off" names nobody, so we cannot know WHICH
                 # pet broke. Clearing all of ours is the safe direction: mis-crediting a
@@ -569,34 +589,127 @@ class LiveCombat(LogParser):
             del self.fights[: len(self.fights) - self.MAX_FIGHTS]
 
     # ── shaping ─────────────────────────────────────────────────────────────
+    def _owner_of(self, name: str, mob: str, a: Actor) -> str:
+        """Who a pet's damage belongs to, or "" if it is not anyone's pet.
+
+        🔴 THIS IS THE WHOLE ENCHANTER PROBLEM. Owner, 2026-08-16: *"charmed pets dps
+        too, its tricky because it looks like an mob name but you would see us use a charm
+        on the mob and it will be hitting other mobs."* A charmed mob keeps its own name,
+        so `is_pet` - which only matches "X`s pet" - never fires on one.
+
+        Measured on the owner's own logs 2026-08-22, before this existed: **633,828 damage
+        from charmed pets credited to nobody**, and on single fights the pet out-damaged
+        him 4x to 32x (Bzzazzt: him 684, pet 21,931). BOTH failure modes the module comment
+        warns about were live at once - the raid list carried mob names as though they were
+        players, AND his own contribution was understated by most of it.
+
+        ⚠ GUARD: never treat the fight's own target as a pet. Charm is tracked BY NAME and
+        mobs share names, so a charmed "a fetid fiend" would otherwise credit the fetid
+        fiend you are currently killing to you as well.
+        """
+        if canon_actor(name) == canon_actor(mob):
+            return ""
+        if a.is_pet and a.owner:                 # summoned: "Balsummonit`s pet"
+            return canon_actor(a.owner)
+        if name in self.charmed:                 # charmed: keyed by mob name
+            return canon_actor(self.charmed[name])
+        return ""
+
     def _rows(self, f: Fight, friendly: set[str]) -> list[dict]:
-        """One row per actor on OUR side, biggest damage first.
+        """One row per PLAYER on our side, biggest damage first, pets folded into their owner.
 
         ⚠ Hostiles are deliberately excluded. The mob's own damage output is not part
         of 'who helped kill it', and including it is exactly the bug resolve_friendly()
         was written to stop.
+
+        Pet damage is credited to the owner AND kept visible in `pets`, so the overlay can
+        show "you 18,449 (+83,404 pet)" instead of either hiding the pet or listing it as a
+        separate player. `own_damage` is the actor's unaided contribution.
         """
-        total = sum(a.damage for n, a in f.actors.items() if n in friendly) or 1
-        rows = []
+        mob = self._mob_name(f, friendly)
+
+        # 🔴 "WHO HELPED KILL IT" IS OBSERVED, NOT INFERRED. Membership here is
+        # ATTACKED-THE-TARGET, which is direct evidence, with resolve_friendly() only as a
+        # fallback for someone who fought the adds instead.
+        #
+        # Why not trust the classifier alone: in a charm-heavy zone it is genuinely
+        # fragile. Measured 2026-08-22 on a Plane of Fear pull - the player `Wakeblade`
+        # dealt 45,861 damage to the scareling we killed and was classified HOSTILE,
+        # because one of our charmed pets hit them (4,985 taken) and the rule "anything a
+        # friendly damages is hostile" flipped them. They vanished from their own kill.
+        #
+        # Attacking the thing we killed cannot be faked by a stray cross-hit, so it is the
+        # stronger signal for this specific question.
+        helped = {src for src, tgts in f.targets.items() if mob in tgts}
+
+        # 1) split the contributors into owners and pets
+        pets: dict[str, list] = {}
+        own: dict[str, Actor] = {}
         for name, a in f.actors.items():
-            if name not in friendly or a.damage <= 0:
+            if a.damage <= 0:
                 continue
-            secs = a.active_secs or f.duration
+            if name not in helped and name not in friendly:
+                continue
+            # 🔴 The mob being killed is never on the "who helped" list, even when
+            # resolve_friendly() has marked its NAME friendly. That happens whenever you
+            # charm one mob and fight another of the same name (Bzzazzt / Bazzzazzt in
+            # the owner's Plane of Sky logs), and charm is tracked by name.
+            #
+            # Direction of the error is chosen deliberately, matching the rule already
+            # stated for charm breaks: mis-crediting a HOSTILE's damage to the player is
+            # worse than losing a few ticks of a same-named pet. Under-report, never
+            # inflate.
+            if canon_actor(name) == canon_actor(mob):
+                continue
+            owner = self._owner_of(name, mob, a)
+            if owner:
+                pets.setdefault(owner, []).append((name, a))
+            else:
+                own[name] = a
+
+        # 2) a pet whose owner never appeared still has to be counted - an enchanter who
+        #    only charms and never swings would otherwise vanish from their own parse.
+        for owner in pets:
+            own.setdefault(owner, None)
+
+        total = sum(a.damage for a in own.values() if a)               + sum(pa.damage for lst in pets.values() for _, pa in lst)
+        total = total or 1
+
+        rows = []
+        for name, a in own.items():
+            mine = a.damage if a else 0
+            plist = pets.get(name, [])
+            pet_dmg = sum(pa.damage for _, pa in plist)
+            dmg = mine + pet_dmg
+            secs = (a.active_secs if a else 0) or f.duration
             rows.append({
                 "name": name,
-                "is_me": name == self.me or name in ("You", "you"),
-                "is_pet": a.is_pet,
-                "owner": a.owner,
-                "damage": a.damage,
-                # both definitions, always labelled — see the module docstring
-                "encounter_dps": round(a.damage / f.duration),
-                "active_dps": round(a.damage / secs) if secs else 0,
-                "share": a.damage / total,
-                "melee": a.dmg_melee, "spell": a.dmg_spell, "dot": a.dmg_dot,
-                "hits": a.hits, "misses": a.misses, "crits": a.crits,
-                "heal_effective": a.heal_effective, "heal_self": a.heal_self,
-                "overheal": a.overheal,
-                "taken": a.dmg_taken,
+                "is_me": canon_actor(name) == canon_actor(self.me) or canon_actor(name) == "You",
+                "is_pet": False,
+                "owner": "",
+                "damage": dmg,
+                "own_damage": mine,
+                "pet_damage": pet_dmg,
+                "pets": [{
+                    "name": pn,
+                    "damage": pa.damage,
+                    "charmed": pn in self.charmed,
+                    "encounter_dps": round(pa.damage / f.duration),
+                } for pn, pa in sorted(plist, key=lambda x: -x[1].damage)],
+                # both definitions, always labelled - see the module docstring
+                "encounter_dps": round(dmg / f.duration),
+                "active_dps": round(dmg / secs) if secs else 0,
+                "share": dmg / total,
+                "melee": a.dmg_melee if a else 0,
+                "spell": a.dmg_spell if a else 0,
+                "dot": a.dmg_dot if a else 0,
+                "hits": a.hits if a else 0,
+                "misses": a.misses if a else 0,
+                "crits": a.crits if a else 0,
+                "heal_effective": a.heal_effective if a else 0,
+                "heal_self": a.heal_self if a else 0,
+                "overheal": a.overheal if a else 0,
+                "taken": a.dmg_taken if a else 0,
             })
         rows.sort(key=lambda r: -r["damage"])
         return rows
