@@ -231,6 +231,11 @@ class Actor:
     heal_self: int = 0          # lifetap / self-sustain, kept OUT of group healing
     dmg_taken: int = 0
     best_hit: int = 0          # biggest single hit; nothing was tracking it
+    # target -> [effective, attempted, casts, best single heal]. Healing totals
+    # alone cannot answer "who am I having to heal, and how often" — which is the
+    # question a healer actually has, and a tank-stress signal besides.
+    heal_out: dict = field(default_factory=dict)
+    heal_spells: collections.Counter = field(default_factory=collections.Counter)
     first_ts: float = 0.0
     last_ts: float = 0.0
     verbs: collections.Counter = field(default_factory=collections.Counter)
@@ -554,6 +559,21 @@ class LogParser:
             # target parses as the actor "Morbid over time".
             if dst.lower().endswith(" over time"):
                 dst = dst[: -len(" over time")]
+
+            # 🔴 PER-TARGET LEDGER GOES HERE, NOT EARLIER. dst is only trustworthy after
+            # the two rewrites above: "healed himself" resolves to the caster, and a
+            # heal-over-time tick arrives as "<name> over time". Recording before them
+            # produced literal targets called "himself" and "Zuuluu over time" — a healer
+            # split across three phantom people. Found 2026-08-23 the first time the
+            # healing view was rendered.
+            _t = canon_actor(dst)
+            _rec = a.heal_out.setdefault(_t, [0, 0, 0, 0])
+            _rec[0] += eff
+            _rec[1] += att
+            _rec[2] += 1
+            _rec[3] = max(_rec[3], eff)
+            if m.group("spell"):
+                a.heal_spells[m.group("spell").strip()] += 1
             src, dst = canon_actor(src), canon_actor(dst)
             if src != dst:
                 self.heal_edges.append((src, dst))
@@ -897,6 +917,68 @@ class LiveCombat(LogParser):
             # 🔴 NO MOB HP. The log never states it, so the overlay has nothing to draw a
             # health bar from. Anything shown there would be invented.
         }
+
+    def healing(self, f: Fight | None = None) -> dict | None:
+        """Healing shaped for a healer, not for a damage meter.
+
+        Owner, 2026-08-23: "HPS heals per second type thing for our healers just kinda who
+        youve healed and for how much and how often you are having to heal them."
+
+        That last clause is the interesting one and no parser I know of shows it. Healing
+        totals tell you how much you poured out; **heals per minute on a given target**
+        tells you who is in trouble. Cross-referenced against what that target actually
+        TOOK, it answers the real question: am I keeping up, and on whom.
+
+        ⚠ HPS is computed on healing to OTHERS. Including lifetap self-sustain would put a
+        necro at the top of the healing chart, which is the same flattery `heal_others`
+        exists to prevent.
+        """
+        f = f or self.cur or (self.fights[-1] if self.fights else None)
+        if f is None:
+            return None
+        friendly = self.resolve_friendly()
+        dur = f.duration
+        out = []
+        for name, a in f.actors.items():
+            if name not in friendly or not a.heal_effective:
+                continue
+            others = a.heal_others
+            targets = []
+            for t, (eff, att, casts, best) in a.heal_out.items():
+                ta = f.actors.get(t)
+                targets.append({
+                    "name": t,
+                    "healed": eff,
+                    "casts": casts,
+                    "best": best,
+                    "overheal": max(0, att - eff),
+                    "overheal_pct": ((att - eff) / att) if att else 0.0,
+                    # how often you are HAVING to heal them
+                    "per_min": (casts / dur * 60.0) if dur else 0.0,
+                    # and what they were taking while you did it. `covered` over 1.0 means
+                    # you out-healed the damage we can see; under it, you did not keep up.
+                    "took": ta.dmg_taken if ta else 0,
+                    "covered": (eff / ta.dmg_taken) if (ta and ta.dmg_taken) else None,
+                    "is_self": canon_actor(t) == canon_actor(name),
+                })
+            targets.sort(key=lambda x: -x["healed"])
+            out.append({
+                "name": name,
+                "is_me": canon_actor(name) == canon_actor(self.me) or canon_actor(name) == "You",
+                "hps": round(others / dur) if dur else 0,
+                "hps_total": round(a.heal_effective / dur) if dur else 0,
+                "healed_others": others,
+                "self_sustain": a.heal_self,
+                "total": a.heal_effective,
+                "overheal": a.overheal,
+                "overheal_pct": (a.overheal / a.heal_attempted) if a.heal_attempted else 0.0,
+                "casts": sum(t["casts"] for t in targets),
+                "spells": a.heal_spells.most_common(6),
+                "targets": targets,
+            })
+        out.sort(key=lambda r: -r["healed_others"])
+        return {"mob": self._mob_name(f, friendly), "duration": dur,
+                "killed": f.killed, "healers": out}
 
     def current(self) -> dict | None:
         """The fight in progress, or None between pulls."""
