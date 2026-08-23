@@ -953,8 +953,17 @@ class LiveCombat(LogParser):
                     "best": best,
                     "overheal": max(0, att - eff),
                     "overheal_pct": ((att - eff) / att) if att else 0.0,
-                    # how often you are HAVING to heal them
-                    "per_min": (casts / dur * 60.0) if dur else 0.0,
+                    # 🔴 TWO DIFFERENT QUESTIONS, and one label cannot carry both.
+                    # Owner, 2026-08-23: "is that how many times i basicly had to cast on
+                    # him or is it the amount of hp we healed in that min". It was casts,
+                    # labelled "heals/min", which reads as HP. Both are useful, so both
+                    # ship, named for what they are:
+                    #   casts_per_min — how OFTEN you are having to heal them
+                    #   hps           — how MUCH healing per second they needed
+                    #   secs_between  — the same cadence stated the way a healer feels it
+                    "casts_per_min": (casts / dur * 60.0) if dur else 0.0,
+                    "hps": (eff / dur) if dur else 0.0,
+                    "secs_between": (dur / casts) if casts else 0.0,
                     # and what they were taking while you did it. `covered` over 1.0 means
                     # you out-healed the damage we can see; under it, you did not keep up.
                     "took": ta.dmg_taken if ta else 0,
