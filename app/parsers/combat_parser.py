@@ -76,9 +76,30 @@ RX_SPELL_DD = re.compile(
 # fine in the melee patterns only because those groups are pinned by required literals.
 # Anchor `mods` to parenthesised tokens — the only thing that actually follows.
 _MODS = r"(?P<mods>(?:\s*\([^)]*\))*)\s*$"
+# 🔴 TWO gaps found 2026-08-23 by counting damage-shaped lines no pattern claimed:
+#   * "You HAVE taken 42 damage from Tainted Breath by a pledge familiar."  (613 lines)
+#     — second person again, the fourth instance of that family tonight.
+#   * "<X> has taken 30 damage from Sicken."                                 (12 lines)
+#     — a DoT tick with NO caster named. Requiring " by <src>" dropped it entirely.
+# The caster group is optional now; an unattributed tick still counts as damage taken.
 RX_DOT = re.compile(
-    r"^(?P<dst>.+?) has taken (?P<dmg>\d+) damage from (?P<spell>.+?) by (?P<src>[^.]+?)\.?"
+    r"^(?P<dst>.+?) ha(?:s|ve) taken (?P<dmg>\d+) damage from (?P<spell>[^.]+?)"
+    r"(?: by (?P<src>[^.]+?))?\.?"
     + _MODS)
+
+# 🔴 FRENZY WAS INVISIBLE — 1,103 hits in one 12 MB slice (993 plain, 100 Critical,
+# 10 Finishing Blow). It is a Berserker SKILL and the log writes it with a preposition:
+#     "Zuuluu frenzies on an initiate familiar for 84 points of damage."
+# RX_MELEE expects "<verb> <target>", so "frenzies on" never matched and every point of
+# Frenzy damage went uncounted. Kept as its own pattern rather than loosening RX_MELEE,
+# which would let the non-greedy source group swallow a word on every ordinary swing.
+# Damage we can see but cannot credit to anyone. Kept as a real actor so totals stay
+# honest — a fight's damage should add up even when part of it has no owner.
+UNATTRIBUTED = "(unattributed)"
+
+RX_SKILL_ON = re.compile(
+    r"^(?P<src>.+?) (?P<verb>frenzies) on (?P<dst>.+?) for (?P<dmg>\d+) points? of damage\.?"
+    r"(?P<mods>.*)$")
 
 RX_NONMELEE = re.compile(
     r"^(?P<dst>.+?) was hit by non-melee for (?P<dmg>\d+) points? of damage")
@@ -376,8 +397,24 @@ class LogParser:
         if m:
             self.combat_lines += 1
             f = self._touch(ts, m.group("dst"))
-            self._hit(ts, f, m.group("src"), m.group("dst"), int(m.group("dmg")),
-                      "dmg_dot", m.group("mods") or "", spell=m.group("spell"))
+            # 🔴 The caster group is OPTIONAL now (a tick can name no caster), so this
+            # can be None. Credit it to a sentinel rather than crashing or dropping it:
+            # the damage is real and the TARGET's damage-taken must still be right, we
+            # just cannot say who dealt it. Never invent an attacker to fill the hole.
+            # "A glyphed ghoul has taken 8 damage from YOUR Leech." — the caster IS
+            # named, in the possessive, and there is no trailing "by <name>". Reading it
+            # as unattributed threw away your own DoT ticks. Found 2026-08-23 by asking
+            # what damage we could see but not credit: it was 12 lines, and all 12 were
+            # the owner's own.
+            spell_raw = (m.group("spell") or "")
+            src = m.group("src")
+            if not src and spell_raw.lower().startswith("your "):
+                src = "You"
+            src = src or UNATTRIBUTED
+            self._hit(ts, f, src, m.group("dst"), int(m.group("dmg")),
+                      "dmg_dot", m.group("mods") or "",
+                      spell=spell_raw[5:].strip() if spell_raw.lower().startswith("your ")
+                      else spell_raw)
             return
 
         m = RX_MELEE.match(body)
@@ -387,6 +424,25 @@ class LogParser:
             self._hit(ts, f, m.group("src"), m.group("dst"), int(m.group("dmg")),
                       "dmg_melee", m.group("mods") or "", verb=m.group("verb"))
             return
+
+        # Frenzy — a skill, and its own line shape. Same bookkeeping as a melee hit.
+
+        m = RX_SKILL_ON.match(body)
+
+        if m:
+
+            self.combat_lines += 1
+
+            fight = self._touch(ts, m.group('dst'))
+
+            self._hit(ts, fight, m.group('src'), m.group('dst'),
+
+                      int(m.group('dmg')), 'dmg_melee',
+
+                      mods=m.group('mods') or '', verb=m.group('verb'))
+
+            return
+
 
         m = RX_SPELL_DD.match(body)
         if m:
