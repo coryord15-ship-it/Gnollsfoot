@@ -61,7 +61,21 @@ class CombatView(ctk.CTkFrame):
     # ── wiring ──────────────────────────────────────────────────────────────
     def _boot(self):
         try:
-            from app.parsers.combat_parser import LiveCombat, TS, parse_ts
+            from app.parsers.combat_parser import (LiveCombat, TS, parse_ts,
+                                                    set_player_name, player_name_from_log)
+            # 🔴 Teach the parser which character IS "You" before a single line lands.
+            # EQ names the player outright in some lines ("You healed Morbid for 42 hit
+            # points by Lifedraw"), and without this that reads as healing a DIFFERENT
+            # actor: it splits the player in two AND books lifetap self-sustain as group
+            # healing. Measured on a 12 MB slice — 91% of "healing" was self-sustain.
+            try:
+                lw = getattr(self._app, "log_watcher", None)
+                path = lw.log_path() if lw is not None else ""
+                who = player_name_from_log(path or "")
+                if who:
+                    set_player_name(who)
+            except Exception:
+                log.debug("player name not resolved", exc_info=True)
             self._lc = LiveCombat()
             self._ts, self._parse_ts = TS, parse_ts
             self._ready = True
@@ -155,6 +169,10 @@ class CombatView(ctk.CTkFrame):
             sub = f"{r['damage']:,} dmg · {r['share']*100:.0f}%"
             if r["pet_damage"]:
                 sub += f"   (own {r['own_damage']:,} + pet {r['pet_damage']:,})"
+            if r.get("heal_others"):
+                sub += f"   ·  healed {r['heal_others']:,}"
+            if r.get("heal_self"):
+                sub += f"   ·  self {r['heal_self']:,}"
             self._lab(c, sub, theme.FONT_BODY_SMALL, theme.TEXT_MUTED).pack(fill="x", padx=11)
             holder = ctk.CTkFrame(c, fg_color="transparent")
             holder.pack(fill="x", padx=11, pady=(0, 9))

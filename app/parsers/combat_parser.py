@@ -246,6 +246,18 @@ class Actor:
         return max(0.0, self.last_ts - self.first_ts)
 
     @property
+    def heal_others(self) -> int:
+        """Healing that actually went to someone else.
+
+        🔴 `heal_effective` counts every heal INCLUDING self-sustain, so a lifetapping
+        DPS reads as a healer if a UI shows it raw. Measured 2026-08-23: the owner's
+        92,657 "healing" was 83,941 lifetap self-heal — 91% of it. The module already
+        warned about exactly this; the number just had nowhere honest to live.
+        Show THIS in a healing column; keep heal_effective for the total.
+        """
+        return max(0, self.heal_effective - self.heal_self)
+
+    @property
     def overheal(self) -> int:
         return max(0, self.heal_attempted - self.heal_effective)
 
@@ -275,6 +287,31 @@ class Fight:
         return a
 
 
+# The character the log belongs to. EQ writes the player as "You" when they act, but
+# names them outright in some lines — "You healed Morbid for 42 hit points by Lifedraw."
+# Without knowing that Morbid IS You, that parses as healing a DIFFERENT actor.
+#
+# 🔴 MEASURED 2026-08-23, and it is not cosmetic: on one 12 MB slice it split the owner
+# into two actors, credited him with 92,657 of GROUP HEALING that is really lifetap
+# self-sustain (self-heal read zero), and created 551 heal edges between him and himself.
+# The module already warns that lumping self-sustain into group healing "makes a
+# lifetapping DPS look like a healer" — this is how it happened anyway.
+#
+# Set from the log filename (eqlog_<Character>_<server>.txt) via player_name_from_log().
+_PLAYER = {"name": ""}
+
+
+def set_player_name(name: str):
+    """Teach the parser which character IS "You". Safe to call repeatedly."""
+    _PLAYER["name"] = (name or "").strip()
+
+
+def player_name_from_log(path: str) -> str:
+    """EQ names logs eqlog_<Character>_<server>.txt — free, and always correct."""
+    m = re.match(r"eqlog_([A-Za-z]+)_([A-Za-z]+)", os.path.basename(path or ""))
+    return m.group(1) if m else ""
+
+
 _ARTICLE = re.compile(r"^(A|An|The) ")
 
 
@@ -294,7 +331,11 @@ def canon_actor(name: str) -> str:
     version had; attack-direction resolution is only as good as knowing who "we" are.
     """
     n = name.strip()
-    if n.lower() == "you":
+    low = n.lower()
+    if low == "you":
+        return "You"
+    # the player's own character name is the same actor as "You"
+    if _PLAYER["name"] and low == _PLAYER["name"].lower():
         return "You"
     # 🔴 SECOND CASING SPLIT, same class, one level up. EQ capitalises a mob when it
     # is the SUBJECT of the sentence and lowercases it as the OBJECT:
@@ -490,8 +531,11 @@ class LogParser:
             # every mob and every player into one component and mark the raid boss
             # friendly. They are self-heals: drop them.
             src, dst = m.group("src"), m.group("dst")
-            selfheal = dst.lower() in ("himself", "herself", "itself",
-                                       "themselves", "themself")
+            # Pronoun form, OR the same actor under two names ("You healed Morbid").
+            # canon_actor folds the character name into "You", so compare canonically.
+            selfheal = (dst.lower() in ("himself", "herself", "itself",
+                                        "themselves", "themself")
+                        or canon_actor(src) == canon_actor(dst))
             if selfheal:
                 dst = src
                 # ⚠ LIFETAP IS BOTH. Owner, 2026-08-16: *"lifetap does heal, it damages
@@ -783,6 +827,7 @@ class LiveCombat(LogParser):
                 "misses": a.misses if a else 0,
                 "crits": a.crits if a else 0,
                 "heal_effective": a.heal_effective if a else 0,
+                "heal_others": a.heal_others if a else 0,
                 "heal_self": a.heal_self if a else 0,
                 "overheal": a.overheal if a else 0,
                 "taken": a.dmg_taken if a else 0,
