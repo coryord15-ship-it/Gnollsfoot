@@ -1514,6 +1514,18 @@ def main():
     win = MainWindow(app)
     win.withdraw()
     app.main_window = win
+
+    # Feed the Combat tab from the ONE log reader the app already runs. LogWatcher
+    # dispatches every raw line to on_any_line callbacks, so this adds a consumer, not
+    # a second tail. Guarded: the combat view is optional and must never break startup.
+    def _combat_raw(line: str):
+        cv = getattr(win, "_combat_view", None)
+        if cv is not None:
+            cv.feed_line(line)
+    try:
+        app.log_watcher.on_any_line(_combat_raw)
+    except Exception:
+        log.debug("combat feed not wired", exc_info=True)
     # Boot splash is a plain tk.Tk() created FIRST, so it became tkinter's default root.
     # CTkFont / CTkScrollableFrame need a default root; if we leave splash as default and
     # then destroy it, _default_root becomes None and Settings (built lazily after splash

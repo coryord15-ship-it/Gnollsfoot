@@ -167,10 +167,20 @@ class MainWindow(ctk.CTk):
         # One content frame per section; build the existing tab content into each
         self._sections = {
             key: ctk.CTkFrame(self._content, fg_color=theme.BG, corner_radius=0)
-            for key in ("Recent Alerts", "Quest Journal", "Settings")
+            for key in ("Recent Alerts", "Quest Journal", "Combat", "Settings")
         }
         self._build_alerts_tab(self._sections["Recent Alerts"])
         self._build_questlog_tab(self._sections["Quest Journal"])
+        # Combat tab — the DPS parser finally has a consumer. Guarded: a fault here
+        # must not stop the rest of the window from building.
+        self._combat_view = None
+        try:
+            from app.ui.combat_view import CombatView
+            self._combat_view = CombatView(self._sections["Combat"], self._app)
+            self._combat_view.pack(fill="both", expand=True)
+        except Exception:
+            import logging
+            logging.getLogger(__name__).exception("combat tab failed to build")
         # SettingsTab is built lazily on first show — CTkScrollableFrame created while
         # the section is pack_forget()'d often stays permanently empty.
         self._settings_tab = SettingsTab(self._sections["Settings"], self._app)
@@ -181,6 +191,7 @@ class MainWindow(ctk.CTk):
         for key, label, icon in (
             ("Recent Alerts", "Alerts", "🔔"),
             ("Quest Journal", "Journal", "📖"),
+            ("Combat", "Combat", "⚔"),
             ("Settings", "Settings", "⚙"),
         ):
             btn = ctk.CTkButton(

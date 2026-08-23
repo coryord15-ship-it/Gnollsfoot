@@ -53,9 +53,17 @@ RX_MELEE = re.compile(
     r"(?P<mods>.*)$")
 
 # "Aeaadyene hit a tormented spirit for 80680 points of cold damage by Gelid Claw XVIII."
+# 🔴 THE SAME TRAILING-GROUP BUG THE DOT PATTERN BELOW WARNS ABOUT, still live here.
+# `(?P<spell>.+?)` followed by an optional `\.?` and a `.*` that accepts anything lets the
+# non-greedy group collapse to ONE CHARACTER, with the rest landing in `mods`:
+#     "You hit an initiate familiar for 56 points of fire damage by Flame Bolt."
+#     -> spell = "F"
+# Measured 2026-08-22: every spell name in the file truncated to a single letter. It hid
+# for months because nothing read Actor.spells until the combat tab needed a breakdown.
+# Fix is the same as RX_DOT's: forbid the dot inside the name and anchor the tail.
 RX_SPELL_DD = re.compile(
     r"^(?P<src>.+?) hit (?P<dst>.+?) for (?P<dmg>\d+) points? of (?P<type>[a-z]+) damage"
-    r"(?: by (?P<spell>.+?))?\.?(?P<mods>.*)$")
+    r"(?: by (?P<spell>[^.]+?))?\.?(?P<mods>(?:\s*\([^)]*\))*)\s*$")
 
 # "A tormented spirit has taken 492752 damage from Scorpikis Blood Rk. II by Balsham."
 # ⚠ NOTE THE ORDER: target first, SPELL second, CASTER LAST. Reading the first name as
@@ -75,8 +83,15 @@ RX_DOT = re.compile(
 RX_NONMELEE = re.compile(
     r"^(?P<dst>.+?) was hit by non-melee for (?P<dmg>\d+) points? of damage")
 
+# 🔴 SECOND PERSON AGAIN, measured 2026-08-22. This matched only "X tries to ..." and
+# the log writes YOUR misses as "You try to slash a ghoul, but miss!" — 13,571 of them in
+# one 12 MB slice, every one invisible. Consequence: your own hit chance read a flat 100%
+# (58 hits / 58 swings) because the denominator never saw a miss.
+#
+# This is the SAME defect that was fixed for melee HITS (verb stems accepting both forms)
+# and it was left in the miss pattern, because nothing consumed accuracy until now.
 RX_MISS = re.compile(
-    rf"^(?P<src>.+?) tries to (?P<verb>\w+) (?P<dst>.+?), but (?P<how>.+?)!")
+    rf"^(?P<src>.+?) (?:tries|try) to (?P<verb>\w+) (?P<dst>.+?), but (?P<how>.+?)!")
 
 # "Risith healed itself for 0 (196) hit points by Curate's Channeled Mark."
 # The bare number is EFFECTIVE healing; the parenthesised one is the ATTEMPTED amount.
@@ -84,7 +99,9 @@ RX_MISS = re.compile(
 # a healer who is spamming into a full-health tank.
 RX_HEAL = re.compile(
     r"^(?P<src>.+?) (?:healed|heals) (?P<dst>.+?) for (?P<eff>\d+)"
-    r"(?:\s*\((?P<att>\d+)\))? hit points?(?: by (?P<spell>.+?))?\.?")
+    # 🔴 Third instance of the same trailing-group bug (see RX_SPELL_DD above). A lifetap
+    # emits a heal line, so "Vampiric Embrace" was landing in Actor.spells as "V".
+    r"(?:\s*\((?P<att>\d+)\))? hit points?(?: by (?P<spell>[^.]+?))?\.?\s*$")
 
 # ── Casting interruption ────────────────────────────────────────────────────
 # 542 lines in a single session and NOTHING read them. For a class that gets bashed
@@ -192,6 +209,7 @@ class Actor:
     heal_attempted: int = 0
     heal_self: int = 0          # lifetap / self-sustain, kept OUT of group healing
     dmg_taken: int = 0
+    best_hit: int = 0          # biggest single hit; nothing was tracking it
     first_ts: float = 0.0
     last_ts: float = 0.0
     verbs: collections.Counter = field(default_factory=collections.Counter)
@@ -325,6 +343,8 @@ class LogParser:
         a.last_ts = ts
         setattr(a, kind, getattr(a, kind) + dmg)
         a.hits += 1
+        if dmg > a.best_hit:
+            a.best_hit = dmg
         if verb:
             a.verbs[verb] += 1
         if spell:
@@ -710,6 +730,22 @@ class LiveCombat(LogParser):
                 "heal_self": a.heal_self if a else 0,
                 "overheal": a.overheal if a else 0,
                 "taken": a.dmg_taken if a else 0,
+                "best_hit": a.best_hit if a else 0,
+                # ⚠ misses are only logged for MELEE, so this is melee accuracy and
+                # the UI must say so — calling it "accuracy" flat would overstate a caster.
+                # 🔴 None, not 1.0, when no misses were recorded. Measured 2026-08-23:
+                # OTHER players' miss lines only start appearing in the owner's logs around
+                # 2026-08-16 (0-131/day before, 12k-28k/day after), so before that every
+                # other actor would read a flat 100% hit chance. Zero misses means we did
+                # not observe them, which is not the same as never missing — and a UI must
+                # not print a number it cannot support.
+                "accuracy": (a.hits / (a.hits + a.misses)) if (a and a.misses) else None,
+                "crit_rate": (a.crits / a.hits) if (a and a.hits) else 0.0,
+                "avg_hit": (a.damage / a.hits) if (a and a.hits) else 0.0,
+                # verbs/spells/mods were counted all along and nothing ever read them
+                "verbs": a.verbs.most_common(6) if a else [],
+                "spells": a.spells.most_common(6) if a else [],
+                "mods": a.mods.most_common(4) if a else [],
             })
         rows.sort(key=lambda r: -r["damage"])
         return rows
