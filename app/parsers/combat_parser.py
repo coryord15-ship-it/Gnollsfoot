@@ -104,6 +104,20 @@ RX_SKILL_ON = re.compile(
 RX_NONMELEE = re.compile(
     r"^(?P<dst>.+?) was hit by non-melee for (?P<dmg>\d+) points? of damage")
 
+# Damage shields, which are written PASSIVELY and name the victim first:
+#     "An initiate familiar is burned by YOUR flames for 5 points of non-melee damage."
+#     "YOU are pierced by a pledge familiar's thorns for 7 points of non-melee damage!"
+# The first is damage we DEAL and was being counted as zero; the second is damage we TAKE
+# and must not be credited to us. The possessive tells them apart — "YOUR" bare, everyone
+# else with "'s" - so the two arms of the alternation are what decide direction.
+#
+# Small but real: 226 hits for 1,220 damage over a two-day slice. Worth having because a
+# shield ticks on EVERY incoming swing, so its share grows with the number of things
+# hitting you - exactly the fights where the number matters most.
+RX_SHIELD = re.compile(
+    r"^(?P<dst>.+?) (?:is|are) (?P<verb>[a-z]+) by (?:(?P<mine>YOUR)|(?P<src>.+?)'s) "
+    r"(?P<noun>[a-z]+) for (?P<dmg>\d+) points? of non-melee damage", re.I)
+
 # 🔴 SECOND PERSON AGAIN, measured 2026-08-22. This matched only "X tries to ..." and
 # the log writes YOUR misses as "You try to slash a ghoul, but miss!" — 13,571 of them in
 # one 12 MB slice, every one invisible. Consequence: your own hit chance read a flat 100%
@@ -229,6 +243,7 @@ class Actor:
     heal_effective: int = 0
     heal_attempted: int = 0
     heal_self: int = 0          # lifetap / self-sustain, kept OUT of group healing
+    dmg_shield: int = 0        # damage shield ticks — small, but they are ours
     dmg_taken: int = 0
     best_hit: int = 0          # biggest single hit; nothing was tracking it
     # target -> [effective, attempted, casts, best single heal]. Healing totals
@@ -244,7 +259,7 @@ class Actor:
 
     @property
     def damage(self) -> int:
-        return self.dmg_melee + self.dmg_spell + self.dmg_dot
+        return self.dmg_melee + self.dmg_spell + self.dmg_dot + self.dmg_shield
 
     @property
     def active_secs(self) -> float:
@@ -359,11 +374,40 @@ def canon_actor(name: str) -> str:
     return n
 
 
+_MONTHS = {"Jan": 1, "Feb": 2, "Mar": 3, "Apr": 4, "May": 5, "Jun": 6,
+           "Jul": 7, "Aug": 8, "Sep": 9, "Oct": 10, "Nov": 11, "Dec": 12}
+_DAY_CACHE: dict[str, int] = {}
+
+
 def parse_ts(s: str) -> float:
-    """EQ stamps `Sat Aug 16 01:47:06 2026`. Only the clock matters for a fight."""
+    """EQ stamps `Sat Aug 16 01:47:06 2026` — parse the DATE too, not just the clock.
+
+    🔴 The first version read only `s[11:19]` on the reasoning that "only the clock
+    matters for a fight". It does not. At midnight the clock falls from 86399 back to 0,
+    so every duration computed across that boundary is negative by most of a day:
+
+      * `(ts - f.end) > IDLE_TIMEOUT` is FALSE for a -86398 delta, so the fight never
+        closes — it swallows everything after midnight into one encounter.
+      * `duration = end - start` then goes negative and clamps to 0, and DPS is
+        `damage / duration`, so the number is garbage in both directions.
+
+    Measured 2026-08-23 on a 12 MB slice: it reported a span of **-2.2 hours**. Any
+    late-night session — which is most of them — was affected.
+
+    The date part is cached because consecutive lines almost always share it; this stays
+    a few string slices per line rather than a datetime construction.
+    """
     try:
-        hh, mm, ss = s[11:19].split(":")
-        return int(hh) * 3600 + int(mm) * 60 + int(ss)
+        key = s[4:11] + s[20:24]
+        base = _DAY_CACHE.get(key)
+        if base is None:
+            from datetime import date
+            # 719163 = date(1970, 1, 1).toordinal(). Timezone-naive on purpose: we only
+            # ever subtract two of these, so a consistent origin is all that is required.
+            base = (date(int(s[20:24]), _MONTHS[s[4:7]], int(s[8:10])).toordinal()
+                    - 719163) * 86400
+            _DAY_CACHE[key] = base
+        return base + int(s[11:13]) * 3600 + int(s[14:16]) * 60 + int(s[17:19])
     except Exception:
         return 0.0
 
@@ -380,6 +424,15 @@ class LogParser:
     def __init__(self):
         self.fights: list[Fight] = []
         self.cur: Fight | None = None
+        # one open encounter PER MOB, so chain-pulling does not merge them
+        self.open: dict[str, Fight] = {}
+        # 🔴 The mob WE are swinging at, which is not the same as the last
+        # encounter any line touched. Owner, 2026-08-23: "we need to parse only
+        # the mob we are attacking at the time." With several encounters open at
+        # once, an add that merely hits you would otherwise steal the readout
+        # from the mob you are actually fighting.
+        self.attacking: Fight | None = None
+        self.attacking_ts: float = 0.0
         self.zone = ""
         self.skills: collections.Counter = collections.Counter()
         self.classes: collections.Counter = collections.Counter()
@@ -396,14 +449,60 @@ class LogParser:
         self.heal_edges: list[tuple[str, str]] = []   # resolved by resolve_friendly()
 
     # ── fight lifecycle ──────────────────────────────────────────────────────
-    def _touch(self, ts: float, target: str) -> Fight:
-        if self.cur is None or (ts - self.cur.end) > self.IDLE_TIMEOUT:
-            self.cur = Fight(name=target or "unknown", start=ts, end=ts)
-            self.fights.append(self.cur)
-        self.cur.end = ts
-        return self.cur
+    def _touch(self, ts: float, target: str, other: str = "") -> Fight:
+        """Get (or open) the encounter for THIS mob.
+
+        🔴 REWRITTEN 2026-08-23. The old version kept ONE current fight and started a new
+        one only after IDLE_TIMEOUT of total quiet. While chain-pulling a camp there is
+        never 10 idle seconds, so every kill merged into a single enormous "fight":
+        measured on the owner's log, one encounter held **7 distinct hostiles over 524
+        seconds**, named after whichever mob happened to be touched first.
+
+        The damage was right; the DENOMINATOR was not. His DPS was his real damage divided
+        by an entire camp session including all the downtime between pulls, which is why
+        it read 36 when he knew it was higher.
+
+        Encounters are now keyed PER MOB and time out independently.
+
+        ⚠ Pick the mob, not the target. A line can be us hitting it or it hitting us, so
+        when one side is the player the OTHER side names the encounter — otherwise every
+        incoming swing opens a fight called "You".
+        """
+        a, b = canon_actor(target or ""), canon_actor(other or "")
+        key = a
+        if a == "You" and b and b != "You":
+            key = b
+        if not key or key == "You":
+            key = a or "unknown"
+
+        # Drop encounters that have gone quiet. Without this `open` accumulates one
+        # entry per mob ever seen — 80 of them on a single 12 MB slice — and a respawn
+        # would rejoin a fight that ended minutes ago.
+        if len(self.open) > 24:
+            for k in [k for k, v in self.open.items() if (ts - v.end) > self.IDLE_TIMEOUT]:
+                del self.open[k]
+
+        f = self.open.get(key)
+        if f is None or (ts - f.end) > self.IDLE_TIMEOUT:
+            f = Fight(name=key, start=ts, end=ts)
+            self.fights.append(f)
+            self.open[key] = f
+        f.end = ts
+        self.cur = f
+        return f
+
+    def close_fight(self, name: str):
+        """A mob died — its encounter is over, so a respawn starts a fresh one."""
+        f = self.open.pop(canon_actor(name or ""), None)
+        if f is not None and f is self.attacking:
+            self.attacking = None
 
     def _hit(self, ts, fight, src, dst, dmg, kind, mods="", verb="", spell=""):
+        # every damage path lands here, so this is the one place that always knows
+        # whether the swing was ours
+        if canon_actor(src) == "You":
+            self.attacking = fight
+            self.attacking_ts = ts
         a = fight.actor(src)
         if not a.first_ts:
             a.first_ts = ts
@@ -442,7 +541,7 @@ class LogParser:
         m = RX_DOT.match(body)
         if m:
             self.combat_lines += 1
-            f = self._touch(ts, m.group("dst"))
+            f = self._touch(ts, m.group("dst"), m.group("src") or "")
             # 🔴 The caster group is OPTIONAL now (a tick can name no caster), so this
             # can be None. Credit it to a sentinel rather than crashing or dropping it:
             # the damage is real and the TARGET's damage-taken must still be right, we
@@ -466,7 +565,7 @@ class LogParser:
         m = RX_MELEE.match(body)
         if m:
             self.combat_lines += 1
-            f = self._touch(ts, m.group("dst"))
+            f = self._touch(ts, m.group("dst"), m.group("src"))
             self._hit(ts, f, m.group("src"), m.group("dst"), int(m.group("dmg")),
                       "dmg_melee", m.group("mods") or "", verb=m.group("verb"))
             return
@@ -479,7 +578,7 @@ class LogParser:
 
             self.combat_lines += 1
 
-            fight = self._touch(ts, m.group('dst'))
+            fight = self._touch(ts, m.group('dst'), m.group('src'))
 
             self._hit(ts, fight, m.group('src'), m.group('dst'),
 
@@ -493,14 +592,26 @@ class LogParser:
         m = RX_SPELL_DD.match(body)
         if m:
             self.combat_lines += 1
-            f = self._touch(ts, m.group("dst"))
+            f = self._touch(ts, m.group("dst"), m.group("src"))
             self._hit(ts, f, m.group("src"), m.group("dst"), int(m.group("dmg")),
                       "dmg_spell", m.group("mods") or "", spell=m.group("spell") or "")
             return
 
+        m = RX_SHIELD.match(body)
+        if m:
+            # Only OUR shield is ours. "YOU are pierced by <mob>'s thorns" is damage
+            # taken — it still belongs to the fight, credited to the mob, never to us.
+            src = "You" if m.group("mine") else (m.group("src") or UNATTRIBUTED)
+            self.combat_lines += 1
+            f = self._touch(ts, m.group("dst"), src)
+            self._hit(ts, f, src, m.group("dst"), int(m.group("dmg")),
+                      "dmg_shield", verb=m.group("verb"),
+                      spell=(m.group("noun") or "").strip())
+            return
+
         m = RX_MISS.match(body)
         if m:
-            f = self._touch(ts, m.group("dst"))
+            f = self._touch(ts, m.group("dst"), m.group("src"))
             a = f.actor(m.group("src"))
             a.misses += 1
             if not a.first_ts:
@@ -624,14 +735,18 @@ class LogParser:
             return
 
         m = RX_SLAIN.match(body)
-        if m and self.cur:
-            self.cur.killed = True
+        if m:
+            f = self.open.get(canon_actor(m.group("dst")))
+            (f or self.cur) and setattr(f or self.cur, "killed", True)
+            self.close_fight(m.group("dst"))
             return
         # Kills by anyone else. Without this, group kills never register and every fight
         # reports "no kill" — which is what the first run did on all 434 fights.
         m = RX_DEATH.match(body)
-        if m and self.cur:
-            self.cur.killed = True
+        if m:
+            f = self.open.get(canon_actor(m.group("dst")))
+            (f or self.cur) and setattr(f or self.cur, "killed", True)
+            self.close_fight(m.group("dst"))
             return
         m = RX_ZONE.match(body)
         if m:
@@ -1035,9 +1150,13 @@ class LiveCombat(LogParser):
         live fight the moment someone nearby swings, and the DPS readout belongs to
         strangers. The owner asked for this directly.
         """
-        if self.cur is None or not self.engaged(self.cur):
+        # The mob we are ATTACKING, not merely the last one any line mentioned. Stale
+        # once the encounter has run on past our last swing by more than the idle window
+        # — at that point we have stopped hitting it and it is no longer "current".
+        f = self.attacking
+        if f is None or (f.end - self.attacking_ts) > self.IDLE_TIMEOUT:
             return None
-        return self._shape(self.cur)
+        return self._shape(f)
 
     def last_kill(self) -> dict | None:
         """The most recent fight that actually ended in a kill."""

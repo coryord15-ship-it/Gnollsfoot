@@ -29,7 +29,9 @@ from app.ui import theme
 
 log = logging.getLogger(__name__)
 
-REFRESH_MS = 1500
+# The main window is read and interacted with, not watched — it refreshes slowly and
+# only when its data changed. A live HUD is the overlay's job, not this tab's.
+REFRESH_MS = 4000
 
 
 class CombatView(ctk.CTkFrame):
@@ -41,6 +43,7 @@ class CombatView(ctk.CTkFrame):
         self._parse_ts = None
         self._live_seen = False
         self._ready = False
+        self._last_sig = None
 
         self._scroll = ctk.CTkScrollableFrame(self, fg_color="transparent")
         self._scroll.pack(fill="both", expand=True, padx=6, pady=6)
@@ -98,12 +101,41 @@ class CombatView(ctk.CTkFrame):
             log.exception("combat feed")
 
     # ── render ──────────────────────────────────────────────────────────────
+    def _signature(self):
+        """Cheap fingerprint of what _render draws from."""
+        lc = self._lc
+        if lc is None:
+            return None
+        cur = getattr(lc, "attacking", None)
+        return (len(lc.fights), self._live_seen,
+                round(cur.end, 1) if cur is not None else 0,
+                round(sum(a.damage for a in cur.actors.values()), 0) if cur is not None else 0)
+
     def _tick(self):
+        """Redraw only when the data moved, and never while we are in the background.
+
+        🔴 Owner, 2026-08-23, about the devkit build carrying this same view: "the front
+        page of the app keeps refreshing so much i cant move the window or anything the
+        only thing that should refresh that often is the layover live view."
+
+        `_render` destroys and rebuilds the entire widget tree. Doing that every 1.5s
+        makes the window hard to drag or scroll and burns CPU redrawing tabs sitting
+        behind EverQuest. Both gates below are cheap; the overlay is unaffected.
+        """
         try:
-            self._render()
+            sig = self._signature()
+            if sig != self._last_sig and self._visible():
+                self._last_sig = sig
+                self._render()
         except Exception:
             log.exception("combat render")
         self.after(REFRESH_MS, self._tick)
+
+    def _visible(self) -> bool:
+        try:
+            return bool(self.winfo_ismapped()) and self.winfo_toplevel().focus_displayof() is not None
+        except Exception:
+            return True
 
     def _clear(self):
         for w in self._body.winfo_children():
