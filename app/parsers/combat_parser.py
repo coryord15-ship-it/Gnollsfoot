@@ -510,7 +510,17 @@ class LogParser:
 
         m = RX_HEAL.match(body)
         if m:
-            f = self._touch(ts, m.group("dst"))
+            # 🔴 Resolve the target BEFORE opening a fight on it. The raw dst can be a
+            # PRONOUN ("healed himself") or carry a HoT suffix ("Zuuluu over time"), and
+            # _touch() names the fight after whatever it is handed. Measured 2026-08-23:
+            # 64 of 300 "fights" were one-second phantoms named `himself`, `herself`,
+            # `itself` — created by nearby players self-healing, nothing to do with us.
+            _d = m.group("dst")
+            if _d.lower() in ("himself", "herself", "itself", "themselves", "themself"):
+                _d = m.group("src")
+            if _d.lower().endswith(" over time"):
+                _d = _d[: -len(" over time")]
+            f = self._touch(ts, canon_actor(_d))
             a = f.actor(m.group("src"))
             eff = int(m.group("eff"))
             att = int(m.group("att")) if m.group("att") else eff
@@ -900,6 +910,35 @@ class LiveCombat(LogParser):
         #    header. Say we do not know instead.
         return "unknown" if canon_actor(f.name) == "You" else f.name
 
+    def engaged(self, f: Fight) -> bool:
+        """Did WE actually take part in this fight?
+
+        Owner, 2026-08-23: "i dont want it showing me the dps to a fight that i havent
+        engaged in ... like look for my auto attack to be on or something."
+
+        Auto-attack state is the wrong signal — it can be on while you are nowhere near
+        the mob that died. Participation is directly observable instead: we dealt damage,
+        we took damage, or we healed in it. Anything else is somebody else's fight that
+        happened within earshot, and a DPS readout for it is noise.
+
+        ⚠ Damage-taken counts deliberately: being beaten on by an add you never hit is
+        still your fight, and a tank who never lands a swing is still in it.
+        """
+        a = f.actors.get("You")
+        if not a:
+            return False
+        if a.damage or a.dmg_taken or a.heal_effective:
+            return True
+        # our pets and charmed mobs fighting for us count as us
+        for name, act in f.actors.items():
+            if act.damage <= 0:
+                continue
+            if act.is_pet and canon_actor(act.owner) == "You":
+                return True
+            if name in self.charmed and canon_actor(self.charmed[name]) == "You":
+                return True
+        return False
+
     def _shape(self, f: Fight | None) -> dict | None:
         if f is None:
             return None
@@ -990,13 +1029,20 @@ class LiveCombat(LogParser):
                 "killed": f.killed, "healers": out}
 
     def current(self) -> dict | None:
-        """The fight in progress, or None between pulls."""
+        """The fight in progress that WE are in, or None.
+
+        ⚠ Gated on engaged(). Without it a scrap happening next to you becomes "your"
+        live fight the moment someone nearby swings, and the DPS readout belongs to
+        strangers. The owner asked for this directly.
+        """
+        if self.cur is None or not self.engaged(self.cur):
+            return None
         return self._shape(self.cur)
 
     def last_kill(self) -> dict | None:
         """The most recent fight that actually ended in a kill."""
         for f in reversed(self.fights):
-            if f.killed and f is not self.cur:
+            if f.killed and f is not self.cur and self.engaged(f):
                 return self._shape(f)
         return None
 
@@ -1007,6 +1053,8 @@ class LiveCombat(LogParser):
         for f in reversed(self.fights):
             if len(out) >= limit:
                 break
+            if not self.engaged(f):
+                continue
             rows = self._rows(f, friendly)
             # A "fight" where nobody on our side dealt damage is us being hit in passing,
             # not an encounter. Showing those pushes real kills off the history.
