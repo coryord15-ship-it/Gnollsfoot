@@ -167,20 +167,42 @@ class MainWindow(ctk.CTk):
         # One content frame per section; build the existing tab content into each
         self._sections = {
             key: ctk.CTkFrame(self._content, fg_color=theme.BG, corner_radius=0)
-            for key in ("Recent Alerts", "Quest Journal", "Combat", "Settings")
+            for key in ("Recent Alerts", "Quest Journal", "Combat", "Tools", "Settings")
         }
         self._build_alerts_tab(self._sections["Recent Alerts"])
         self._build_questlog_tab(self._sections["Quest Journal"])
         # Combat tab — the DPS parser finally has a consumer. Guarded: a fault here
         # must not stop the rest of the window from building.
+        # Use the FULL combat readout -- browsable history, pinning, per-actor drill-down
+        # (melee/spell/dot split, hit chance, crit rate, best and average hit). The plainer
+        # `CombatView` is the one the owner had already rejected as "kinda plain no real
+        # details to it"; the first merge pass regressed to it by accident. It stays in the
+        # tree as the fallback if the ported section cannot build.
         self._combat_view = None
         try:
-            from app.ui.combat_view import CombatView
-            self._combat_view = CombatView(self._sections["Combat"], self._app)
+            from app.ui.tools_section import CombatSection
+            self._combat_view = CombatSection(
+                self._sections["Combat"], self._app,
+                feed=getattr(self._app, "combat_feed", None))
             self._combat_view.pack(fill="both", expand=True)
         except Exception:
             import logging
             logging.getLogger(__name__).exception("combat tab failed to build")
+        # Tools — the devkit tabs (Healing / Loot / Gear / Codex) plus the overlay, merged
+        # in on 2026-08-25 so the journal and the DPS work are one app. It shares the SAME
+        # CombatFeed the Combat tab uses, so the two can never disagree. Guarded like the
+        # Combat tab: a fault here degrades one section, it does not stop the window.
+        self._tools_section = None
+        try:
+            from app.ui.tools_section import ToolsSection
+            self._tools_section = ToolsSection(
+                self._sections["Tools"], self._app,
+                feed=getattr(self._app, "combat_feed", None))
+            self._tools_section.pack(fill="both", expand=True)
+        except Exception:
+            import logging
+            logging.getLogger(__name__).exception("tools tab failed to build")
+
         # SettingsTab is built lazily on first show — CTkScrollableFrame created while
         # the section is pack_forget()'d often stays permanently empty.
         self._settings_tab = SettingsTab(self._sections["Settings"], self._app)
@@ -192,6 +214,7 @@ class MainWindow(ctk.CTk):
             ("Recent Alerts", "Alerts", "🔔"),
             ("Quest Journal", "Journal", "📖"),
             ("Combat", "Combat", "⚔"),
+            ("Tools", "Tools", "🧰"),
             ("Settings", "Settings", "⚙"),
         ):
             btn = ctk.CTkButton(

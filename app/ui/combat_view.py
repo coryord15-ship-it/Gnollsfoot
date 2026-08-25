@@ -44,6 +44,7 @@ class CombatView(ctk.CTkFrame):
         self._live_seen = False
         self._ready = False
         self._last_sig = None
+        self._shared = None
 
         self._scroll = ctk.CTkScrollableFrame(self, fg_color="transparent")
         self._scroll.pack(fill="both", expand=True, padx=6, pady=6)
@@ -79,7 +80,17 @@ class CombatView(ctk.CTkFrame):
                     set_player_name(who)
             except Exception:
                 log.debug("player name not resolved", exc_info=True)
-            self._lc = LiveCombat()
+            # Prefer the app-wide CombatFeed if it exists: the Tools tabs (Healing, Loot)
+            # read the same object, and two parsers over one log would drift apart and
+            # report different numbers for the same fight. Fall back to a private parser
+            # only if the shared one could not be built.
+            shared = getattr(self._app, "combat_feed", None)
+            if shared is not None and getattr(shared, "lc", None) is not None:
+                self._lc = shared.lc
+                self._shared = shared
+            else:
+                self._lc = LiveCombat()
+                self._shared = None
             self._ts, self._parse_ts = TS, parse_ts
             self._ready = True
             self._status.configure(text="watching for combat")
@@ -93,6 +104,11 @@ class CombatView(ctk.CTkFrame):
         if not self._ready:
             return
         try:
+            # When the shared feed owns the parser it has ALREADY consumed this line in
+            # main.py. Feeding it again here would double every hit and double the DPS.
+            if self._shared is not None:
+                self._live_seen = bool(getattr(self._shared, "live_seen", False))
+                return
             m = self._ts.match(line or "")
             if m:
                 self._lc.feed(m.group("body"), self._parse_ts(m.group("ts")))

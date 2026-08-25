@@ -1509,6 +1509,36 @@ def main():
     except Exception:
         log.debug("quest sightings unavailable", exc_info=True)
 
+    # ONE combat parser for the whole app, built BEFORE the window so the Combat tab and
+    # the Tools tabs (Healing / Loot) both receive the same instance. Two parsers reading
+    # the same log would drift apart and show different numbers for the same fight.
+    try:
+        from app.ui.combat_feed import CombatFeed
+        app.combat_feed = CombatFeed()
+        _lp = ""
+        try:
+            _lp = app.log_watcher.log_path() or ""
+        except Exception:
+            pass
+        app.combat_feed.start(_lp)
+        # Prime from recent history so the first view has context. These lines are fed with
+        # live=False, which leaves `live_seen` False — otherwise a fight that ended hours ago
+        # renders as "IN COMBAT" the instant the app opens.
+        if _lp and os.path.exists(_lp):
+            try:
+                _sz = os.path.getsize(_lp)
+                with open(_lp, "rb") as _fh:
+                    _fh.seek(max(0, _sz - 4 * 1024 * 1024))
+                    _fh.readline()
+                    for _raw in _fh:
+                        app.combat_feed.feed_line(
+                            _raw.decode("utf-8", "replace").rstrip(), live=False)
+            except Exception:
+                log.debug("combat priming skipped", exc_info=True)
+    except Exception:
+        app.combat_feed = None
+        log.debug("combat feed unavailable", exc_info=True)
+
     # Build UI — withdraw immediately so it doesn't flash up behind/beside the splash;
     # shown for real once everything below is wired.
     win = MainWindow(app)
@@ -1519,6 +1549,9 @@ def main():
     # dispatches every raw line to on_any_line callbacks, so this adds a consumer, not
     # a second tail. Guarded: the combat view is optional and must never break startup.
     def _combat_raw(line: str):
+        feed = getattr(app, "combat_feed", None)
+        if feed is not None:
+            feed.feed_line(line, live=True)
         cv = getattr(win, "_combat_view", None)
         if cv is not None:
             cv.feed_line(line)
