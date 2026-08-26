@@ -1515,11 +1515,41 @@ def main():
     try:
         from app.ui.combat_feed import CombatFeed
         app.combat_feed = CombatFeed()
+        # 🔴 DO NOT rely on log_watcher here: it is not started until much later in this
+        # function (see log_watcher.start below), so log_path() on an unstarted watcher
+        # returns nothing or raises. That silently left _lp empty, which skipped BOTH the
+        # damage priming and the charm seed on EVERY launch. It looked fine only because
+        # live lines arrive seconds later and refill the parser.
         _lp = ""
         try:
             _lp = app.log_watcher.log_path() or ""
         except Exception:
-            pass
+            _lp = ""
+        if not _lp or not os.path.exists(_lp):
+            # Resolve it ourselves: newest eqlog_*.txt in the configured directory, or the
+            # configured file. Deliberately ignores .bak archives -- priming wants the
+            # CURRENT session, not a rotated one.
+            try:
+                import glob as _glob
+                cfg = getattr(app, "config", None) or {}
+                cands = []
+                for _k in ("log_file_path", "log_dir", "eq_log_dir"):
+                    _v = cfg.get(_k) if hasattr(cfg, "get") else None
+                    if not _v:
+                        continue
+                    if os.path.isdir(_v):
+                        cands += _glob.glob(os.path.join(_v, "eqlog_*.txt"))
+                    elif os.path.exists(_v):
+                        cands.append(_v)
+                if not cands:
+                    _default = ("C:/Users/Public/Daybreak Game Company/Installed Games/"
+                                "EverQuest Legends/Logs")
+                    cands = _glob.glob(os.path.join(_default, "eqlog_*.txt"))
+                if cands:
+                    _lp = max(cands, key=os.path.getmtime)
+            except Exception:
+                log.debug("could not resolve a log path for priming", exc_info=True)
+        log.info("combat priming source: %s", _lp or "(none found)")
         app.combat_feed.start(_lp)
         # Establish WHO IS OUR PET from a much larger window than damage priming reads.
         # A pet charmed an hour ago renders as an independent combatant otherwise.

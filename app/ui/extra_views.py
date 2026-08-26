@@ -76,6 +76,20 @@ ITEMS = load("items.json", {})
 CATALOG = load("exaltations.json", [])
 MOBS = load("mobs.json", {})
 
+def pet_label(name):
+    """Display name for a pet row.
+
+    The parser appends " (your pet)" only to disambiguate a charmed pet whose name COLLIDES
+    with the mob being fought (`an ice giant` pet vs `an ice giant` target). Once the row is
+    indented beneath its owner the suffix is redundant, and at overlay width it truncated to
+    the memorable "an ice giant (yo".
+    """
+    for suffix in (" (your pet)", " (unknown pet)"):
+        if name.endswith(suffix):
+            return name[: -len(suffix)]
+    return name
+
+
 def loose_name(x):
     """Match item names across the log/DB boundary despite punctuation drift.
 
@@ -273,7 +287,7 @@ class Overlay(ctk.CTkToplevel):
                     for p in (r.get("pets") or [])[:2]:
                         pl = ctk.CTkFrame(c, fg_color="transparent")
                         pl.pack(fill="x", padx=(14, 0))
-                        lab(pl, "└ " + p["name"][:16], F_SMALL, T3).pack(side="left")
+                        lab(pl, "└ " + pet_label(p["name"])[:18], F_SMALL, T3).pack(side="left")
                         lab(pl, f"{p['damage']:,}", F_SMALL, T3).pack(side="right")
         except Exception:
             pass
@@ -1049,7 +1063,7 @@ def tab_combat(tab, app):
                 pc.pack(fill="x", padx=(30, 11), pady=(0, 5))
                 pl = ctk.CTkFrame(pc, fg_color="transparent")
                 pl.pack(fill="x")
-                lab(pl, "└ " + p["name"], F_SMALL, T3).pack(side="left")
+                lab(pl, "└ " + pet_label(p["name"]), F_SMALL, T3).pack(side="left")
                 share = (p["damage"] / r["damage"] * 100) if r.get("damage") else 0
                 lab(pl, f"{p['damage']:,}   {share:.0f}% of yours"
                     if r.get("is_me") else f"{p['damage']:,}   {share:.0f}%",

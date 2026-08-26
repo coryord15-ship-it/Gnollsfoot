@@ -112,6 +112,16 @@ RANGED_VERBS = {"shoot", "shoots"}
 
 UNATTRIBUTED = "(unattributed)"
 
+#: Appended to a charmed pet whose name COLLIDES with the mob being fought.
+#: 🔴 Owner, 2026-08-25, screenshot: his charmed pet was `an ice giant` while he was killing
+#: `an ice giant`. Actors are keyed by NAME, so the pet and the target collapsed into a single
+#: actor -- the pet's damage vanished into the enemy's row, and `_owner_of`'s "never treat the
+#: fight's own target as a pet" guard then correctly refused to credit it to him. Both halves
+#: behaved as designed and the result was still wrong.
+#: The tell is unambiguous: `an ice giant -> an ice giant` appeared 77 times in one fight, and
+#: a mob does not attack itself. When source and target share a name, the SOURCE is the pet.
+PET_SUFFIX = " (your pet)"
+
 RX_SKILL_ON = re.compile(
     r"^(?P<src>.+?) (?P<verb>frenzies) on (?P<dst>.+?) for (?P<dmg>\d+) points? of damage\.?"
     r"(?P<mods>.*)$")
@@ -561,6 +571,23 @@ class LogParser:
         if canon_actor(src) == "You":
             self.attacking = fight
             self.attacking_ts = ts
+        # Same name on both sides of a damage line means a charmed pet is hitting a mob that
+        # shares its name. Split the SOURCE into its own actor so the two stop merging.
+        if src and dst and canon_actor(src) == canon_actor(dst):
+            base = canon_actor(src)
+            owner = self.charmed.get(base)
+            if owner:
+                src = base + PET_SUFFIX
+                # Register the split name too, so _owner_of folds it to the charmer instead
+                # of tripping the same-name guard.
+                self.charmed[src] = owner
+                self.friendly.add(src)
+            else:
+                # Not a pet we know about. Still split it: leaving it merged would credit
+                # the attacker's damage to the thing it is attacking, which is worse than an
+                # unowned extra row.
+                src = base + " (unknown pet)"
+
         a = fight.actor(src)
         if not a.first_ts:
             a.first_ts = ts
