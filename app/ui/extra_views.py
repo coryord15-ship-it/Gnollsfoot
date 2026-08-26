@@ -354,29 +354,38 @@ def tab_loot(tab, app):
 
 
 def tab_healing(tab, app):
-    """Healing from the healer's side, not the damage meter's.
+    """Healing, rewritten 2026-08-25 to answer the two questions the owner actually asks.
 
-    Owner, 2026-08-23: "HPS heals per second type thing for our healers just kinda who
-    youve healed and for how much and how often you are having to heal them."
+    He dropped the per-second framing outright: *"i dont like the heals per second lets just
+    highlight who we healed and what our over all Healing average between all fights per
+    day."* So HPS, casts/min and secs-between are gone from the display -- the parser still
+    computes them, nothing reads them here.
 
-    The last clause is the one worth building. Totals say how much you poured out;
-    HEALS PER MINUTE ON A TARGET says who is in trouble, and set against what that target
-    actually took, whether you kept up. That pairing is the thing no other parser shows.
+    What is left is deliberately two things:
+      WHO YOU HEALED   aggregated across every parsed fight, biggest first
+      PER DAY          total healing divided by fights that day -- an average per fight,
+                       which is comparable across a long night and a short one
+
+    Self-sustain (lifetap) is kept OUT of both and shown separately. Folding it in would put
+    a lifetapping paladin at the top of his own healing chart, which is exactly the flattery
+    `heal_others` exists to prevent -- measured at 91% of his total on 2026-08-23.
     """
-    state = {"pick": None}
-
     head = card(tab)
     head.pack(fill="x", padx=10, pady=(10, 4))
     st = lab(head, "waiting for healing...", F_BODY, T2)
     st.pack(fill="x", padx=12, pady=(10, 2))
-    filt = lab(head, "", F_SMALL, WARN)
-    filt.pack(fill="x", padx=12, pady=(0, 2))
-    wrap(head, "HP/sec is healing to OTHERS per second of fight. Per target: HPS is how MUCH "
-               "they needed, casts/min is how OFTEN you had to cast. Lifetap self-sustain is "
-               "listed separately — counting it would top the chart with a necro.", T3)\
-        .pack(fill="x", padx=12, pady=(0, 10))
+    wrap(head, "Who you healed, and your average healing per fight on each day. Healing to "
+               "OTHERS only - lifetap self-sustain is listed on its own, because counting it "
+               "would top the chart with your own hits.", T3)        .pack(fill="x", padx=12, pady=(0, 10))
     body = ctk.CTkFrame(tab, fg_color="transparent")
     body.pack(fill="both", expand=True)
+
+    def day_of(fight):
+        """Calendar date of a fight, from the parser's date-aware timestamps."""
+        try:
+            return datetime.date.fromordinal(int(fight.start // 86400) + 719163)
+        except Exception:
+            return None
 
     def redraw():
         lc = app.tail.lc if app.tail else None
@@ -384,118 +393,102 @@ def tab_healing(tab, app):
             return
         clear(body)
 
-        # pick the fight: pinned, else the one with the most healing in it
-        fights = list(reversed(lc.fights))[:40]
-        pick = state["pick"]
-        h = None
-        if pick is not None and pick < len(fights):
-            h = lc.healing(fights[pick])
-        if h is None or not h["healers"]:
-            bestv = -1
-            for fi in fights:
-                cand = lc.healing(fi)
-                if cand and cand["healers"]:
-                    v = sum(x["healed_others"] for x in cand["healers"])
-                    if v > bestv:
-                        bestv, h = v, cand
-        if not h or not h["healers"]:
-            st.configure(text="no healing recorded yet", text_color=T3)
-            lab(body, "nothing to show — heal something", F_BODY, T3).pack(padx=12, pady=12)
+        targets = {}      # who -> [healed, casts, best, overheal]
+        per_day = {}      # date -> [healed_to_others, fight_count]
+        self_heal = 0
+        for fi in lc.fights:
+            d = day_of(fi)
+            if d is not None:
+                per_day.setdefault(d, [0, 0])[1] += 1
+            me = fi.actors.get("You")
+            if me is None:
+                continue
+            self_heal += me.heal_self
+            # 🔴 BOTH numbers come from the LEDGER, never from `heal_others`.
+            # `heal_others` is a RESIDUAL: heal_effective minus heal_self. Measured
+            # 2026-08-25 on a 4 MB slice, the ledger recorded all 4,693 healing against
+            # target "You" while heal_self counted only 3,613 -- so heal_others reported
+            # 1,080 healing "to others" on a session where he healed nobody at all. Some
+            # self-heal line shape is not being counted as self, and the residual quietly
+            # became a phantom group-healing figure.
+            # Summing the ledger instead makes the per-day total and the who-you-healed
+            # list agree BY CONSTRUCTION: they are the same rows, added up two ways.
+            for t, (eff, att, casts, best) in me.heal_out.items():
+                if t == "You" or not eff:
+                    continue          # self-sustain is counted separately, never as a target
+                if d is not None:
+                    per_day[d][0] += eff
+                row = targets.setdefault(t, [0, 0, 0, 0])
+                row[0] += eff
+                row[1] += casts
+                row[2] = max(row[2], best)
+                row[3] += max(0, att - eff)
+
+        total = sum(v[0] for v in targets.values())
+        st.configure(
+            text=("%s   %s   %s healed to others across %d fights"
+                  % (app.tail.zone or "unknown zone",
+                     chr(183), format(total, ",")
+                     if total else "no group healing yet", len(lc.fights))),
+            text_color=T1)
+
+        if not targets and not self_heal:
+            lab(body, "no healing recorded yet", F_BODY, T3).pack(padx=12, pady=12)
             return
 
-        st.configure(text=f"{h['mob']}   ·   {h['duration']:.0f}s   ·   "
-                          f"{len(h['healers'])} healer(s)", text_color=T1)
-        # Self-diagnosing: if OTHER people's zero-effective heals show up and yours never
-        # do, a log filter is hiding your fully-overhealed casts and the overheal figure
-        # below is a floor. Say so rather than printing a number we know is low.
-        t = app.tail
-        if t and t.heal_any["you"] > 40 and t.heal_zero["you"] == 0 and t.heal_zero["others"] > 0:
-            filt.configure(text=(
-                f"YOUR OVERHEAL IS UNDER-REPORTED. {t.heal_any['you']} of your heals logged, none "
-                f"landing for 0, while others logged {t.heal_zero['others']}. That is EQ's "
-                f"Interface > Colors > Heals (Yours) set to \"Nonzero Only\" — it drops every "
-                f"fully-overhealed cast. Set it to \"Show\" (and Heal Over Time too) for a true "
-                f"figure. Everything else here is unaffected."))
-        else:
-            filt.configure(text="")
+        # ── per day ─────────────────────────────────────────────────────────
+        if per_day:
+            section(body, "your healing per day - average per fight")
+            today = datetime.date.today()
+            days = sorted(per_day, reverse=True)
+            peak = max((v[0] / max(1, v[1])) for v in per_day.values()) or 1
+            for d in days:
+                healed, fights = per_day[d]
+                avg = healed / max(1, fights)
+                label = ("today" if d == today
+                         else "yesterday" if (today - d).days == 1
+                         else "%s" % d.strftime("%a %b %d"))
+                c = card(body)
+                row = ctk.CTkFrame(c, fg_color="transparent")
+                row.pack(fill="x", padx=11, pady=(8, 0))
+                lab(row, label, F_BODY, T1 if healed else T3).pack(side="left")
+                lab(row, "%s avg / fight" % format(int(avg), ","), F_MONO,
+                    GOLD if healed else T3).pack(side="right")
+                lab(c, "%s healed over %d fight%s"
+                       % (format(healed, ","), fights, "" if fights == 1 else "s"),
+                    F_SMALL, T3).pack(fill="x", padx=11)
+                holder = ctk.CTkFrame(c, fg_color="transparent")
+                holder.pack(fill="x", padx=11, pady=(0, 9))
+                bar(holder, avg / peak, GOLD if healed else BORDER, height=5)
 
-        for r in h["healers"]:
+        # ── who ─────────────────────────────────────────────────────────────
+        if targets:
+            section(body, "who you healed")
+            order = sorted(targets.items(), key=lambda kv: -kv[1][0])
+            peak = order[0][1][0] or 1
+            for name, (healed, casts, best, over) in order:
+                c = card(body)
+                row = ctk.CTkFrame(c, fg_color="transparent")
+                row.pack(fill="x", padx=11, pady=(8, 0))
+                lab(row, name, F_BODY, T1).pack(side="left")
+                lab(row, format(healed, ","), F_MONO, GOLD).pack(side="right")
+                sub = "%d cast%s   %s   biggest %s" % (
+                    casts, "" if casts == 1 else "s", chr(183), format(best, ","))
+                if over:
+                    sub += "   %s %d%% overheal" % (chr(183),
+                                                    round(100 * over / max(1, healed + over)))
+                lab(c, sub, F_SMALL, T3).pack(fill="x", padx=11)
+                holder = ctk.CTkFrame(c, fg_color="transparent")
+                holder.pack(fill="x", padx=11, pady=(0, 9))
+                bar(holder, healed / peak, GOLD, height=5)
+
+        if self_heal:
+            section(body, "your own sustain")
             c = card(body)
-            c.pack(fill="x", padx=10, pady=3)
-            line = ctk.CTkFrame(c, fg_color="transparent")
-            line.pack(fill="x", padx=12, pady=(9, 0))
-            col = GOLD if r["is_me"] else T1
-            lab(line, r["name"], F_BODY, col).pack(side="left")
-            lab(line, f"{r['hps']:,} HP/sec", F_MONO, col).pack(side="right")
-
-            bits = [f"{r['healed_others']:,} to others"]
-            if r["self_sustain"]:
-                bits.append(f"{r['self_sustain']:,} self-sustain")
-            bits.append(f"{r['casts']} casts")
-            bits.append(f"{r['overheal_pct']*100:.0f}% overheal")
-            lab(c, "   ·   ".join(bits), F_SMALL, T3).pack(fill="x", padx=12, pady=(1, 0))
-            if r["spells"]:
-                lab(c, "   " + ",  ".join(f"{a} x{b}" for a, b in r["spells"][:5]),
-                    F_SMALL, T2).pack(fill="x", padx=12, pady=(2, 0))
-
-            # ── who, how much, HOW OFTEN, and did it keep up ────────────────
-            for t in r["targets"]:
-                tc = ctk.CTkFrame(c, fg_color=PANEL, corner_radius=7)
-                tc.pack(fill="x", padx=12, pady=(6, 0))
-                tl = ctk.CTkFrame(tc, fg_color="transparent")
-                tl.pack(fill="x", padx=10, pady=(7, 0))
-                nm = t["name"] + ("  (self)" if t["is_self"] else "")
-                lab(tl, nm, F_SMALL, T2 if t["is_self"] else T1).pack(side="left")
-                # HOW MUCH on the right, HOW OFTEN underneath - never one number doing
-                # both jobs. "heals/min" read as HP to the owner, and fairly so.
-                lab(tl, f"{t['hps']:.0f} HPS", F_MONO, T1).pack(side="right")
-                cadence = (f"one cast every {t['secs_between']:.0f}s"
-                           if t["secs_between"] >= 1 else "constant")
-                sub = (f"{t['healed']:,} HP healed   ·   {t['casts']} casts"
-                       f"   ·   {cadence}   ·   {t['casts_per_min']:.1f} casts/min"
-                       f"   ·   {t['overheal_pct']*100:.0f}% overheal   ·   best {t['best']:,}")
-                if t["took"]:
-                    sub += f"   ·   they took {t['took']:,}"
-                lab(tc, sub, F_SMALL, T3).pack(fill="x", padx=10, pady=(1, 0))
-
-                # coverage: healing you put in vs damage they took. Capped at 100% for the
-                # bar only — the number itself is printed uncapped so out-healing shows.
-                if t["covered"] is not None:
-                    cov = t["covered"]
-                    colr = OK if cov >= 1.0 else (WARN if cov >= 0.5 else BAD)
-                    hh = ctk.CTkFrame(tc, fg_color="transparent")
-                    hh.pack(fill="x", padx=10, pady=(3, 0))
-                    bar(hh, min(1.0, cov), colr, height=4)
-                    lab(tc, f"covered {cov*100:.0f}% of the damage they took",
-                        F_SMALL, colr).pack(fill="x", padx=10, pady=(2, 8))
-                else:
-                    lab(tc, "no damage recorded on them in this fight",
-                        F_SMALL, T3).pack(fill="x", padx=10, pady=(2, 8))
-            ctk.CTkFrame(c, fg_color="transparent", height=6).pack()
-
-        # ── fight picker ────────────────────────────────────────────────────
-        section(body, "pick a fight")
-        for i, fi in enumerate(fights[:20]):
-            cand = lc.healing(fi)
-            tot = sum(x["healed_others"] for x in cand["healers"]) if cand else 0
-            row = ctk.CTkFrame(body, fg_color=HOVER if i != pick else "#2A2415", corner_radius=8)
-            row.pack(fill="x", padx=10, pady=1)
-            inner = ctk.CTkFrame(row, fg_color="transparent")
-            inner.pack(fill="x", padx=11, pady=6)
-
-            def go(ix=i):
-                state["pick"] = None if state["pick"] == ix else ix
-                redraw()
-
-            a = lab(inner, cand["mob"] if cand else "?", F_SMALL, T1 if tot else T3)
-            a.pack(side="left")
-            b_ = lab(inner, f"{tot:,} healed", F_MONO, T1 if tot else T3)
-            b_.pack(side="right")
-            for w in (row, inner, a, b_):
-                w.bind("<Button-1>", lambda e, fn=go: fn())
+            lab(c, "%s self-healed (lifetap and self-casts)" % format(self_heal, ","),
+                F_BODY, T2).pack(fill="x", padx=12, pady=9)
 
     app.redraw_healing = redraw
-
 
 def _slot_key(s):
     """'Fingers2' -> 'finger'. Strip the 1/2 suffix EQ adds to paired slots.

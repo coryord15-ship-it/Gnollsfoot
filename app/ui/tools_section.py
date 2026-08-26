@@ -231,20 +231,29 @@ class PortedSection(ctk.CTkFrame):
 
 
 class ToolsSection(PortedSection):
-    """Healing / Loot / Gear / Codex, with the class picker and an overlay button."""
+    """Loot / Gear / Codex, with the class picker.
+
+    NO overlay button. Owner, 2026-08-25: *"in the tools section you can remove the overlay
+    button."* It belongs with Combat, which is what it reports on -- and Healing moved there
+    too, so nothing in Tools is a live-combat readout any more.
+    """
 
     def __init__(self, master, app=None, feed=None):
         super().__init__(
             master, app, feed,
-            builders={"Healing": extra_views.tab_healing,
-                      "Loot": extra_views.tab_loot,
+            builders={"Loot": extra_views.tab_loot,
                       "Gear": extra_views.tab_gear,
                       "Codex": extra_views.tab_codex},
-            show_classes=True, show_overlay=True)
+            show_classes=True, show_overlay=False)
 
 
 class CombatSection(PortedSection):
-    """The full combat readout: browsable history, pinning, per-actor drill-down.
+    """Combat and Healing: two readings of the same fights, so they live together.
+
+    Healing moved here on 2026-08-25 at the owner's request -- it was in Tools, which is
+    otherwise reference data (items, drops, donors) rather than anything live.
+
+    The full combat readout: browsable history, pinning, per-actor drill-down.
 
     Replaces the plainer `CombatView`. Owner, 2026-08-22, about that earlier one: *"doesnt
     have a history but it shows like the last mob. kinda plain no real details to it."* The
@@ -255,5 +264,6 @@ class CombatSection(PortedSection):
     def __init__(self, master, app=None, feed=None):
         super().__init__(
             master, app, feed,
-            builders={"Combat": extra_views.tab_combat},
+            builders={"Combat": extra_views.tab_combat,
+                      "Healing": extra_views.tab_healing},
             show_classes=False, show_overlay=True)
