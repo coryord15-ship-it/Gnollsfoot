@@ -213,8 +213,18 @@ RX_CHARM_LAND = re.compile(
 #     An azarack resisted your Allure IV!
 #     Your Allure spell is interrupted.
 # All observed in the same session. The pending-charm flag must be cleared on each.
+# 🔴 EVERY ALTERNATIVE HERE MUST BE ANCHORED TO *YOUR* CAST.
+# Owner, 2026-08-25: *"i noticed my pet didnt come back after i recharmed it."*
+# The bare `spell is interrupted` matched ANY actor's interrupted spell -- and his logs are
+# full of `a glyphed sentry's Beguile spell is interrupted.` A mob fizzling its own spell in
+# the ~3 seconds between his Allure cast and `<mob> has been charmed.` wiped `_pending_charm`,
+# so the landing was ignored and the pet was never registered as his. In a busy fight that is
+# most recharms, which is exactly the reported symptom.
+# `resisted your` and `Your target resisted` were already correctly player-scoped; only the
+# interrupt clause leaked.
 RX_CHARM_FAIL = re.compile(
-    r"cannot be charmed|resisted your |spell is interrupted|Your target resisted", re.I)
+    r"cannot be charmed|resisted your |^Your .{0,40}spell is interrupted|Your target resisted",
+    re.I)
 
 RX_CHARM_BREAK = re.compile(
     r"^(?:Your charm spell has worn off"

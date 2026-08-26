@@ -267,9 +267,14 @@ class Overlay(ctk.CTkToplevel):
                     col = GOLD if r["is_me"] else T1
                     lab(line, r["name"][:20], F_SMALL, col).pack(side="left")
                     lab(line, f"{r['encounter_dps']:,}", F_MONO, col).pack(side="right")
-                    if r["pet_damage"]:
-                        lab(line, f"+pet {r['pet_damage']:,}", F_SMALL, T3).pack(side="right", padx=6)
                     bar(c, r["damage"] / peak, col, height=4)
+                    # Tiered under the owner rather than a "+pet" tag crowding the dps
+                    # figure. Space is tight here, so one indented line per pet and no bar.
+                    for p in (r.get("pets") or [])[:2]:
+                        pl = ctk.CTkFrame(c, fg_color="transparent")
+                        pl.pack(fill="x", padx=(14, 0))
+                        lab(pl, "└ " + p["name"][:16], F_SMALL, T3).pack(side="left")
+                        lab(pl, f"{p['damage']:,}", F_SMALL, T3).pack(side="right")
         except Exception:
             pass
         self.after(1000, self.refresh)
@@ -1030,6 +1035,30 @@ def tab_combat(tab, app):
             h.pack(fill="x", padx=11, pady=(0, 9))
             bar(h, r["damage"] / peak, col)
 
+            # 🔴 Owner, 2026-08-25: *"would you make the pet a but smaller and kinda teired
+            # off under me in the dps window?"*
+            # A pet is not a peer combatant -- its damage is ALREADY inside the owner's
+            # total (see _owner_of: charmed-pet damage is the charmer's, 633,828 of it was
+            # going uncredited). Rendering it as its own top-level row would double-count it
+            # to the eye even though the arithmetic is right. So: indented, smaller type,
+            # thinner bar, and scaled against the OWNER's damage rather than the encounter
+            # peak -- the useful question is "how much of my damage is the pet", not "how
+            # does my pet rank against the raid".
+            for p in (r.get("pets") or []):
+                pc = ctk.CTkFrame(c, fg_color="transparent")
+                pc.pack(fill="x", padx=(30, 11), pady=(0, 5))
+                pl = ctk.CTkFrame(pc, fg_color="transparent")
+                pl.pack(fill="x")
+                lab(pl, "└ " + p["name"], F_SMALL, T3).pack(side="left")
+                share = (p["damage"] / r["damage"] * 100) if r.get("damage") else 0
+                lab(pl, f"{p['damage']:,}   {share:.0f}% of yours"
+                    if r.get("is_me") else f"{p['damage']:,}   {share:.0f}%",
+                    F_SMALL, T3).pack(side="right")
+                lab(pc, "charmed" if p["charmed"] else "summoned", F_SMALL, T3)                    .pack(fill="x")
+                pb = ctk.CTkFrame(pc, fg_color="transparent")
+                pb.pack(fill="x", pady=(2, 0))
+                bar(pb, (p["damage"] / r["damage"]) if r.get("damage") else 0, T3, height=3)
+
             if opened:
                 grid = ctk.CTkFrame(c, fg_color=PANEL, corner_radius=7)
                 grid.pack(fill="x", padx=11, pady=(0, 9))
@@ -1047,10 +1076,6 @@ def tab_combat(tab, app):
                 if r.get("spells"):
                     lab(c, "spells:   " + ",  ".join(f"{v} x{n}" for v, n in r["spells"][:6]),
                         F_SMALL, T2).pack(fill="x", padx=11, pady=(0, 9))
-                for p in r["pets"]:
-                    lab(c, f"pet:  {p['name']}   {p['damage']:,}"
-                           f"{'  charmed' if p['charmed'] else '  summoned'}",
-                        F_SMALL, T3).pack(fill="x", padx=11, pady=(0, 6))
 
         # ── browsable history ────────────────────────────────────────────────
         section(body, f"history — {len(fights)} fights, click to pin one")
