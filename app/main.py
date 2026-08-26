@@ -14,6 +14,7 @@ contribute item data to the community database. Verified items sync to Supabase.
 """
 
 import glob
+import hashlib
 import json
 import logging
 import os
@@ -1643,12 +1644,77 @@ def main():
 
     app._inv_mtimes = {}
 
+    # 🔴 Owner, 2026-08-25: *"that should have a checksum has it changed since last recorded
+    # if yes then upload differance."* Right on both counts, and it was worse than it looked:
+    #   * `_inv_mtimes` lives only in memory, so it reset on EVERY launch and the whole dump
+    #     was re-POSTed each start -- the repeated "Submitted 245 / 127" pairs in his log.
+    #   * even when it did fire it sent the entire file, never the delta.
+    # Now: content hash decides IF anything is sent (mtime moves when a dump is rewritten
+    # identically, a hash does not), and a persisted ledger of already-sent name|id pairs
+    # decides WHAT is sent. Nothing is marked sent unless the POST actually succeeded, so a
+    # failure retries rather than silently dropping the data.
+    _INV_STATE = "inventory_sync.json"
+
+    def _inv_state() -> dict:
+        try:
+            from app.ui import datapaths
+            with open(datapaths.path(_INV_STATE), "r", encoding="utf-8") as fh:
+                d = json.load(fh)
+            return d if isinstance(d, dict) else {}
+        except Exception:
+            return {}
+
+    def _save_inv_state(state: dict) -> None:
+        try:
+            from app.ui import datapaths
+            os.makedirs(os.path.dirname(datapaths.path(_INV_STATE)), exist_ok=True)
+            with open(datapaths.path(_INV_STATE), "w", encoding="utf-8") as fh:
+                json.dump(state, fh, indent=1)
+        except Exception:
+            log.debug("could not persist inventory sync state", exc_info=True)
+
     def _submit_inventory_file(path: str):
         try:
-            with open(path, encoding="utf-8", errors="replace") as f:
-                items = parse_inventory(f.read())
-            if items:
-                app.supabase.submit_inventory(items)
+            with open(path, "rb") as fh:
+                raw = fh.read()
+            digest = hashlib.sha256(raw).hexdigest()
+
+            state = _inv_state()
+            entry = state.get(path) or {}
+            if entry.get("hash") == digest:
+                log.info("inventory unchanged (%s) - nothing to send", os.path.basename(path))
+                return
+
+            items = parse_inventory(raw.decode("utf-8", "replace"))
+            if not items:
+                return
+            # The ledger keys on BOTH name and id: the same name against a different id is
+            # genuinely new identity data, which is the whole point of this feed.
+            sent = set(entry.get("sent") or [])
+            delta = [it for it in items if "%s|%s" % (it["name"], it["id"]) not in sent]
+
+            if not delta:
+                # Content changed (moved bags, quantities) but no new identities. Record the
+                # hash so the next poll short-circuits, and send nothing.
+                entry["hash"] = digest
+                state[path] = entry
+                _save_inv_state(state)
+                log.info("inventory changed but no new item identities (%s)",
+                         os.path.basename(path))
+                return
+
+            if app.supabase.submit_inventory(delta):
+                sent.update("%s|%s" % (it["name"], it["id"]) for it in delta)
+                entry["hash"] = digest
+                entry["sent"] = sorted(sent)
+                state[path] = entry
+                _save_inv_state(state)
+                log.info("inventory delta sent: %d new of %d total (%s)",
+                         len(delta), len(items), os.path.basename(path))
+            else:
+                # Leave hash and ledger untouched so the next poll retries this delta.
+                log.info("inventory delta of %d NOT sent (submit failed) - will retry",
+                         len(delta))
         except Exception:
             log.debug("inventory submit error", exc_info=True)
 

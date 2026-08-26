@@ -284,11 +284,17 @@ class Overlay(ctk.CTkToplevel):
                     bar(c, r["damage"] / peak, col, height=4)
                     # Tiered under the owner rather than a "+pet" tag crowding the dps
                     # figure. Space is tight here, so one indented line per pet and no bar.
+                    # 🔴 SAME COLUMN, SAME UNIT. Owner, 2026-08-25: *"1339 dps? sounds like
+                    # a lot"* — it was 1,338 DAMAGE sitting directly under a row showing 71
+                    # DPS. Two different quantities in the same visual position read as one
+                    # quantity, and he read it exactly that way. The pet shows dps now; its
+                    # raw damage lives in the Combat tab where there is room to label it.
+                    _dur = max(1.0, f.get("duration") or 1.0)
                     for p in (r.get("pets") or [])[:2]:
                         pl = ctk.CTkFrame(c, fg_color="transparent")
                         pl.pack(fill="x", padx=(14, 0))
                         lab(pl, "└ " + pet_label(p["name"])[:18], F_SMALL, T3).pack(side="left")
-                        lab(pl, f"{p['damage']:,}", F_SMALL, T3).pack(side="right")
+                        lab(pl, f"{round(p['damage'] / _dur):,}", F_SMALL, T3).pack(side="right")
         except Exception:
             pass
         self.after(1000, self.refresh)
@@ -1065,10 +1071,14 @@ def tab_combat(tab, app):
                 pl.pack(fill="x")
                 lab(pl, "└ " + pet_label(p["name"]), F_SMALL, T3).pack(side="left")
                 share = (p["damage"] / r["damage"] * 100) if r.get("damage") else 0
-                lab(pl, f"{p['damage']:,}   {share:.0f}% of yours"
-                    if r.get("is_me") else f"{p['damage']:,}   {share:.0f}%",
-                    F_SMALL, T3).pack(side="right")
-                lab(pc, "charmed" if p["charmed"] else "summoned", F_SMALL, T3)                    .pack(fill="x")
+                pdps = round(p["damage"] / max(1.0, show.get("duration") or 1.0))
+                # dps first so the column matches the owner row above; damage is spelled out
+                # on the line below, where it can carry the word "dmg".
+                lab(pl, f"{pdps:,} dps", F_MONO, T3).pack(side="right")
+                lab(pc, f"{p['damage']:,} dmg   {share:.0f}% of "
+                        f"{'yours' if r.get('is_me') else 'theirs'}   "
+                        f"{'charmed' if p['charmed'] else 'summoned'}",
+                    F_SMALL, T3).pack(fill="x")
                 pb = ctk.CTkFrame(pc, fg_color="transparent")
                 pb.pack(fill="x", pady=(2, 0))
                 bar(pb, (p["damage"] / r["damage"]) if r.get("damage") else 0, T3, height=3)
