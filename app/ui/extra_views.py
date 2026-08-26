@@ -219,11 +219,18 @@ class Overlay(ctk.CTkToplevel):
                       fg_color=HOVER, hover_color=BORDER, text_color=T3,
                       font=F_SMALL, command=self.destroy).pack(side="right", padx=8)
 
+        # 🔴 Owner, 2026-08-25: *"we should give an extra line under the npc name in the
+        # title window and put total damage done there."* Every other figure here is a RATE;
+        # this is the one running total, and it belongs next to the thing it was dealt to.
+        self.total_lbl = lab(shell, "", F_SMALL, T3)
+        self.total_lbl.pack(fill="x", padx=20, pady=(0, 2))
+
         top = ctk.CTkFrame(shell, fg_color="transparent")
         top.pack(fill="x", padx=14, pady=(8, 2))
         self.dps = lab(top, "--", F_BIG, T1)
         self.dps.pack(side="left")
-        lab(top, "  your dps", F_SMALL, T2).pack(side="left", pady=(10, 0))
+        self.lbl_dps = lab(top, "  your dps", F_SMALL, T2)
+        self.lbl_dps.pack(side="left", pady=(10, 0))
         self.elapsed = lab(top, "", F_MONO, T2)
         self.elapsed.pack(side="right", pady=(12, 0))
         # 🔴 Owner, 2026-08-23: "there is no way im doing only 36 damage per second."
@@ -271,6 +278,17 @@ class Overlay(ctk.CTkToplevel):
                 self.swing.configure(
                     text=f"{act:,} while swinging" if act and act != enc else "")
                 self.elapsed.configure(text=f"{f['duration']:.0f}s")
+                self.total_lbl.configure(
+                    text=f"{f['total']:,} total damage this fight")
+                # 🔴 The headline already INCLUDES pet damage, and the pet also gets its own
+                # row -- so the two visible numbers never added up to anything and the number
+                # he actually wanted (his own, without the pet) was displayed nowhere.
+                # Owner: *"is this 'You' actually my pet? if so it needs to state that."*
+                # Now the rows are components: own + pet = the headline, and the headline
+                # says so when a pet is contributing.
+                self.lbl_dps.configure(
+                    text="  your dps (you + pet)" if (me or {}).get("pet_damage")
+                    else "  your dps")
                 clear(self.rows)
                 peak = max((r["damage"] for r in f["rows"]), default=1)
                 for r in f["rows"][:6]:
@@ -280,8 +298,12 @@ class Overlay(ctk.CTkToplevel):
                     line.pack(fill="x")
                     col = GOLD if r["is_me"] else T1
                     lab(line, r["name"][:20], F_SMALL, col).pack(side="left")
-                    lab(line, f"{r['encounter_dps']:,}", F_MONO, col).pack(side="right")
-                    bar(c, r["damage"] / peak, col, height=4)
+                    # OWN dps here, not the pet-inclusive total: the pet is listed directly
+                    # below, so showing the combined figure counted it twice on screen.
+                    _own = r.get("own_damage", r["damage"])
+                    _dur0 = max(1.0, f.get("duration") or 1.0)
+                    lab(line, f"{round(_own / _dur0):,}", F_MONO, col).pack(side="right")
+                    bar(c, _own / peak, col, height=4)
                     # Tiered under the owner rather than a "+pet" tag crowding the dps
                     # figure. Space is tight here, so one indented line per pet and no bar.
                     # 🔴 SAME COLUMN, SAME UNIT. Owner, 2026-08-25: *"1339 dps? sounds like

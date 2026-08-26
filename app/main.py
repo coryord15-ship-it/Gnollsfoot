@@ -1654,6 +1654,12 @@ def main():
     # decides WHAT is sent. Nothing is marked sent unless the POST actually succeeded, so a
     # failure retries rather than silently dropping the data.
     _INV_STATE = "inventory_sync.json"
+    # 🔴 One thread per inventory file, all writing ONE state file. Without this lock the
+    # read-modify-write races and the loser's entry is silently dropped -- observed live:
+    # freeport and rivervale both submitted on one launch, only freeport's ledger survived,
+    # so rivervale re-uploaded its entire 127 items on the next start. The lock has to cover
+    # the whole read-modify-write, not just the write.
+    _inv_lock = threading.Lock()
 
     def _inv_state() -> dict:
         try:
@@ -1679,7 +1685,8 @@ def main():
                 raw = fh.read()
             digest = hashlib.sha256(raw).hexdigest()
 
-            state = _inv_state()
+            with _inv_lock:
+                state = _inv_state()
             entry = state.get(path) or {}
             if entry.get("hash") == digest:
                 log.info("inventory unchanged (%s) - nothing to send", os.path.basename(path))
@@ -1696,19 +1703,23 @@ def main():
             if not delta:
                 # Content changed (moved bags, quantities) but no new identities. Record the
                 # hash so the next poll short-circuits, and send nothing.
-                entry["hash"] = digest
-                state[path] = entry
-                _save_inv_state(state)
+                with _inv_lock:
+                    state = _inv_state()          # re-read: another file may have saved
+                    entry["hash"] = digest
+                    state[path] = entry
+                    _save_inv_state(state)
                 log.info("inventory changed but no new item identities (%s)",
                          os.path.basename(path))
                 return
 
             if app.supabase.submit_inventory(delta):
-                sent.update("%s|%s" % (it["name"], it["id"]) for it in delta)
-                entry["hash"] = digest
-                entry["sent"] = sorted(sent)
-                state[path] = entry
-                _save_inv_state(state)
+                with _inv_lock:
+                    state = _inv_state()          # re-read: another file may have saved
+                    sent.update("%s|%s" % (it["name"], it["id"]) for it in delta)
+                    entry["hash"] = digest
+                    entry["sent"] = sorted(sent)
+                    state[path] = entry
+                    _save_inv_state(state)
                 log.info("inventory delta sent: %d new of %d total (%s)",
                          len(delta), len(items), os.path.basename(path))
             else:
