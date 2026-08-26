@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import datetime
 import logging
+import os
 import re
 
 from app.ui import datapaths
@@ -112,6 +113,52 @@ class CombatFeed:
         except Exception:
             log.exception("combat feed unavailable")
             return False
+
+    def seed_charm_state(self, log_path: str, mb: int = 40) -> int:
+        """Pre-scan far back for CHARM/PET lines only, before damage priming.
+
+        🔴 Owner, 2026-08-25: the pet showed as its own row instead of tiering under him,
+        because the app's `charmed` set did not contain it. Damage priming reads the last
+        4 MB — but a charm cast, or the pet last answering a command, can easily be older
+        than that. A pet charmed an hour ago and never spoken to since is then invisible as
+        a pet, and its damage renders as an independent combatant.
+
+        This walks a much larger window and feeds ONLY the lines that establish charm state.
+        It is cheap because it matches against three narrow patterns and never touches the
+        damage path — 40 MB scans in well under a second and costs no fight state.
+
+        ⚠ Deliberately runs BEFORE damage priming: `_owner_of` is evaluated at SHAPING time,
+        not at ingest, so ordering is not strictly required — but seeding first means a
+        `current()` call during startup already has the right owner.
+        """
+        if not self._ready or not log_path or not os.path.exists(log_path):
+            return 0
+        try:
+            from app.parsers.combat_parser import (RX_CHARM_BREAK, RX_CHARM_FAIL,
+                                                   RX_CHARM_LAND, RX_PET_SPEAK, RX_YOU_CAST)
+        except Exception:
+            return 0
+        pats = (RX_PET_SPEAK, RX_CHARM_LAND, RX_CHARM_BREAK, RX_CHARM_FAIL, RX_YOU_CAST)
+        n = 0
+        try:
+            size = os.path.getsize(log_path)
+            with open(log_path, "rb") as fh:
+                fh.seek(max(0, size - mb * 1024 * 1024))
+                fh.readline()
+                for raw in fh:
+                    line = raw.decode("utf-8", "replace").rstrip()
+                    m = self._ts.match(line)
+                    if not m:
+                        continue
+                    body = m.group("body")
+                    if not any(p.match(body) for p in pats):
+                        continue
+                    self.lc.feed(body, self._parse_ts(m.group("ts")))
+                    n += 1
+        except Exception:
+            log.exception("charm seed scan")
+        log.info("charm seed: %d lines, %d pets known", n, len(getattr(self.lc, "charmed", {})))
+        return n
 
     # ── ingest ──────────────────────────────────────────────────────────────
     def feed_line(self, line: str, live: bool = True):

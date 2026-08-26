@@ -1521,6 +1521,12 @@ def main():
         except Exception:
             pass
         app.combat_feed.start(_lp)
+        # Establish WHO IS OUR PET from a much larger window than damage priming reads.
+        # A pet charmed an hour ago renders as an independent combatant otherwise.
+        try:
+            app.combat_feed.seed_charm_state(_lp)
+        except Exception:
+            log.debug("charm seed skipped", exc_info=True)
         # Prime from recent history so the first view has context. These lines are fed with
         # live=False, which leaves `live_seen` False — otherwise a fight that ended hours ago
         # renders as "IN COMBAT" the instant the app opens.
