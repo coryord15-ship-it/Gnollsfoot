@@ -933,7 +933,19 @@ def tab_combat(tab, app):
     def detail_rows(r):
         """Every number we can defend, and nothing we cannot."""
         acc = "not measured" if r.get("accuracy") is None else f"{r['accuracy']*100:.0f}%"
-        out = [("melee", f"{r['melee']:,}"), ("spell", f"{r['spell']:,}"), ("dot", f"{r['dot']:,}")]
+        # 🔴 Owner, 2026-08-25: *"what happen to the dps showing me my break down like melee
+        # damage from skill damage from proc damage from spell damage and such?"* and
+        # *"also pet damage"*. It only ever showed melee/spell/dot -- three buckets for six
+        # questions. dmg_melee silently contained special attacks and archery; dmg_spell
+        # silently contained item procs. On his own log that hid the single biggest fact
+        # about his damage: procs are ~20% of it and Smiting Strike alone is 44,226.
+        # Zero rows are dropped rather than printed -- a category that did nothing this
+        # fight is noise, but a category that did something must never be missing.
+        parts = [("melee", r.get("melee", 0)), ("skill", r.get("skill", 0)),
+                 ("ranged", r.get("ranged", 0)), ("proc", r.get("proc", 0)),
+                 ("spell", r.get("spell", 0)), ("dot", r.get("dot", 0)),
+                 ("pet", r.get("pet_damage", 0))]
+        out = [(k, f"{v:,}") for k, v in parts if v]
         out += [("hit chance", acc), ("crit", f"{r.get('crit_rate',0)*100:.0f}%"),
                 ("swings", f"{r['hits'] + r['misses']:,}")]
         out += [("best hit", f"{r.get('best_hit',0):,}"), ("avg hit", f"{r.get('avg_hit',0):.0f}"),

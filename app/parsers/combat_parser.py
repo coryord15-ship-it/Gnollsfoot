@@ -95,6 +95,21 @@ RX_DOT = re.compile(
 # which would let the non-greedy source group swallow a word on every ordinary swing.
 # Damage we can see but cannot credit to anyone. Kept as a real actor so totals stay
 # honest — a fight's damage should add up even when part of it has no owner.
+# Special attacks, as distinct from ordinary weapon swings. Both land as "dmg_melee" in the
+# log and in storage; this is what separates them for display.
+#
+# EVIDENCE, not vibes: the owner's own skill-up lines name Frenzy and Archery outright
+# ("You have become better at Frenzy!" x30, "Archery" x4). kick/bash/backstab/slam are
+# unambiguous EQ special attacks. Everything else -- slash, pierce, smite, strike, punch,
+# crush -- is treated as a weapon swing.
+# ⚠ Ambiguous verbs default to WEAPON on purpose. Over-claiming "skill damage" would flatter
+# the split; under-claiming is merely incomplete, and the per-verb breakdown shows the truth
+# either way.
+SKILL_VERBS = {"kick", "kicks", "bash", "bashes", "frenzy", "frenzies", "backstab",
+               "backstabs", "slam", "slams", "eagle strike", "tiger claw", "dragon punch",
+               "flying kick", "round kick"}
+RANGED_VERBS = {"shoot", "shoots"}
+
 UNATTRIBUTED = "(unattributed)"
 
 RX_SKILL_ON = re.compile(
@@ -255,6 +270,12 @@ class Actor:
     last_ts: float = 0.0
     verbs: collections.Counter = field(default_factory=collections.Counter)
     spells: collections.Counter = field(default_factory=collections.Counter)
+    # The counters above hold HIT COUNTS. Splitting melee into weapon-vs-skill, and spell
+    # into cast-vs-proc, needs DAMAGE per verb and per spell, so they are tracked alongside
+    # rather than by changing the shape of the existing counters (which several call sites
+    # already read as plain counts).
+    verb_dmg: collections.Counter = field(default_factory=collections.Counter)
+    spell_dmg: collections.Counter = field(default_factory=collections.Counter)
     mods: collections.Counter = field(default_factory=collections.Counter)
 
     @property
@@ -423,6 +444,13 @@ class LogParser:
 
     def __init__(self):
         self.fights: list[Fight] = []
+        # Spells the player was SEEN to cast ("You begin casting X"). A damaging spell that
+        # never appears here fired off an item -- that is a PROC. Measured on one 12 MB
+        # slice: Smiting Strike dealt 136,850 damage over 905 hits with zero cast lines,
+        # i.e. 87% of his non-melee damage was proc damage being displayed as if he had
+        # cast it. Kept on the parser, not the fight: casting a spell once proves it is
+        # castable for the whole session.
+        self.cast_spells: set[str] = set()
         self.cur: Fight | None = None
         # one open encounter PER MOB, so chain-pulling does not merge them
         self.open: dict[str, Fight] = {}
@@ -513,8 +541,10 @@ class LogParser:
             a.best_hit = dmg
         if verb:
             a.verbs[verb] += 1
+            a.verb_dmg[verb] += dmg
         if spell:
             a.spells[spell] += 1
+            a.spell_dmg[spell] += dmg
         if mods:
             if MOD_CRIT.search(mods):
                 a.crits += 1
@@ -703,6 +733,9 @@ class LogParser:
         # ── charm state ──────────────────────────────────────────────────────
         m = RX_YOU_CAST.match(body)
         if m:
+            sp = (m.group("spell") or "").strip()
+            if sp:
+                self.cast_spells.add(sp.lower())
             if CHARM_SPELLS.search(m.group("spell")):
                 self._pending_charm = "You"
             return
@@ -854,6 +887,43 @@ class LiveCombat(LogParser):
             del self.fights[: len(self.fights) - self.MAX_FIGHTS]
 
     # ── shaping ─────────────────────────────────────────────────────────────
+    # ── damage-kind splits ──────────────────────────────────────────────────
+    # These read the per-verb and per-spell ledgers so the parts always sum back to the
+    # stored total; nothing is estimated and nothing is double counted.
+    @staticmethod
+    def _skill_dmg(a) -> int:
+        if not a:
+            return 0
+        return sum(d for v, d in a.verb_dmg.items() if v.lower() in SKILL_VERBS)
+
+    @staticmethod
+    def _ranged_dmg(a) -> int:
+        if not a:
+            return 0
+        return sum(d for v, d in a.verb_dmg.items() if v.lower() in RANGED_VERBS)
+
+    def _weapon_dmg(self, a) -> int:
+        """Ordinary swings: melee total minus the special attacks and archery."""
+        if not a:
+            return 0
+        return max(0, a.dmg_melee - self._skill_dmg(a) - self._ranged_dmg(a))
+
+    def _proc_dmg(self, a) -> int:
+        """Damage from spells we never saw cast -- i.e. fired off a weapon or item."""
+        if not a:
+            return 0
+        return sum(d for sp, d in a.spell_dmg.items()
+                   if sp and sp.lower() not in self.cast_spells)
+
+    def _cast_dmg(self, a) -> int:
+        """Direct damage from spells the player actually cast."""
+        if not a:
+            return 0
+        # Anything in dmg_spell that the per-spell ledger cannot attribute stays here
+        # rather than being silently dropped -- an unnamed spell is a cast until proven
+        # otherwise, and the totals must still reconcile.
+        return max(0, a.dmg_spell - self._proc_dmg(a))
+
     def _owner_of(self, name: str, mob: str, a: Actor) -> str:
         """Who a pet's damage belongs to, or "" if it is not anyone's pet.
 
@@ -965,8 +1035,15 @@ class LiveCombat(LogParser):
                 "encounter_dps": round(dmg / f.duration),
                 "active_dps": round(dmg / secs) if secs else 0,
                 "share": dmg / total,
-                "melee": a.dmg_melee if a else 0,
-                "spell": a.dmg_spell if a else 0,
+                # 🔴 dmg_melee lumps weapon swings, special attacks and archery together;
+                # dmg_spell lumps casts and item procs together. Both are one number in
+                # storage and FOUR different questions on screen, so split them here from
+                # the per-verb / per-spell ledgers rather than adding storage columns.
+                "melee": self._weapon_dmg(a),
+                "skill": self._skill_dmg(a),
+                "ranged": self._ranged_dmg(a),
+                "proc": self._proc_dmg(a),
+                "spell": self._cast_dmg(a),
                 "dot": a.dmg_dot if a else 0,
                 "hits": a.hits if a else 0,
                 "misses": a.misses if a else 0,
