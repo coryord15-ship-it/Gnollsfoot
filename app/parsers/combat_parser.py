@@ -226,6 +226,26 @@ RX_CHARM_FAIL = re.compile(
     r"cannot be charmed|resisted your |^Your .{0,40}spell is interrupted|Your target resisted",
     re.I)
 
+# 🔴 A PET THAT NAMES ITSELF. This is how we learn about a pet we never saw charmed.
+# Owner, 2026-08-25: *"we need to find away to see if i have a pet already charmed like right
+# now i have 1 charmed but its not showing up because i didnt have to cast the charm spell."*
+#
+# The cast->landing handshake only works if the app was running and parsing when the charm
+# was cast. Start the app mid-session, zone in already charmed, or re-charm outside the
+# primed window and the pet is invisible -- its damage silently goes to nobody.
+#
+# But a pet answering a pet command addresses its OWNER and names ITSELF:
+#     Innoruuk`s Chosen told you, 'Attacking Lord of Ire Master.'
+# "told you" means it was directed at this player, and only a pet calls anyone Master. That
+# is two independent facts in one line -- who the pet is, and that it is ours -- with no
+# dependency on having seen the charm land.
+#
+# ⚠ Deliberately NOT matched: "Your pet prefers what it already has equipped..." confirms a
+# pet exists but never names it, so it cannot attribute damage.
+RX_PET_SPEAK = re.compile(
+    r"^(?P<pet>.+?) tells? you, '(?P<msg>.*?(?:Master|Attacking|Following you|"
+    r"Guarding|At your service|No longer taunting|Sorry).*)'", re.I)
+
 RX_CHARM_BREAK = re.compile(
     r"^(?:Your charm spell has worn off"
     r"|(?P<dst>.+?) (?:is no longer charmed|breaks free|has broken free|resumes attacking))")
@@ -762,6 +782,15 @@ class LogParser:
                 self.friendly.add(dst)
             self._pending_charm = ""
             return
+        # A pet speaking identifies itself and its owner without any charm handshake.
+        m = RX_PET_SPEAK.match(body)
+        if m:
+            pet = canon_actor(m.group("pet") or "")
+            if pet and pet != "You":
+                self.charmed[pet] = "You"
+                self.friendly.add(pet)
+            return
+
         m = RX_CHARM_BREAK.match(body)
         if m:
             dst = m.groupdict().get("dst")
