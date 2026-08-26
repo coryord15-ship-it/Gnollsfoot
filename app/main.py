@@ -1552,9 +1552,16 @@ def main():
         feed = getattr(app, "combat_feed", None)
         if feed is not None:
             feed.feed_line(line, live=True)
+        # 🔴 The Combat section is now `CombatSection`, which reads the SHARED feed above and
+        # has no feed_line of its own. The legacy `CombatView` did. Calling it unconditionally
+        # raised AttributeError on EVERY log line -- caught only by launching the app, since
+        # both classes import and construct perfectly well.
+        # Kept as a guarded call rather than deleted: CombatView is still the fallback if
+        # CombatSection fails to build, and it DOES need feeding.
         cv = getattr(win, "_combat_view", None)
-        if cv is not None:
-            cv.feed_line(line)
+        fn = getattr(cv, "feed_line", None)
+        if callable(fn):
+            fn(line)
     try:
         app.log_watcher.on_any_line(_combat_raw)
     except Exception:

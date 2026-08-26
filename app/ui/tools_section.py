@@ -16,7 +16,7 @@ import logging
 
 import customtkinter as ctk
 
-from app.ui import datapaths, extra_views, theme
+from app.ui import datapaths, dps_test, extra_views, history_load, theme
 
 log = logging.getLogger(__name__)
 
@@ -25,6 +25,24 @@ REFRESH_MS = 4000
 #: Tabs that are driven by the live log, so polling them is worthwhile. Gear and Codex are
 #: driven by files and filter widgets -- repopulating those on a timer is pure waste.
 LIVE_TABS = ("Combat", "Healing", "Loot")
+
+
+class _HistoryFeed:
+    """Stands in for CombatFeed when browsing a past day.
+
+    Same attribute surface, so every ported tab renders it without knowing the
+    difference. `live_seen` is False on purpose -- a fight from last Tuesday must
+    never render as "IN COMBAT".
+    """
+
+    def __init__(self, lc, note=""):
+        self.lc = lc
+        self.loot = []
+        self.zone = note
+        self.live_seen = False
+        self.last_ts = 0.0
+        self.heal_zero = {"you": 0, "others": 0}
+        self.heal_any = {"you": 0, "others": 0}
 
 
 class PortedSection(ctk.CTkFrame):
@@ -36,13 +54,14 @@ class PortedSection(ctk.CTkFrame):
     """
 
     def __init__(self, master, app=None, feed=None, builders=None,
-                 show_classes=False, show_overlay=True):
+                 show_classes=False, show_overlay=True, show_history=False):
         super().__init__(master, fg_color=theme.BG, corner_radius=0)
         self._app = app
 
         # `tail` is the shared CombatFeed. The name is kept because the ported bodies say
         # `app.tail.lc`; one alias is cheaper and safer than editing 750 lines of working code.
         self.tail = feed
+        self._live_feed = feed          # restored when leaving history mode
         self.equipped = []
         self.inventory_path = ""
         self._last_sig = None
@@ -75,6 +94,8 @@ class PortedSection(ctk.CTkFrame):
                               command=self.open_overlay).pack(side="right")
             if show_classes:
                 self._build_class_picker(top)
+            if show_history:
+                self._build_history_picker(top)
 
         self.tabs = ctk.CTkTabview(
             self, fg_color=theme.PANEL, segmented_button_fg_color=theme.PANEL_HOVER,
@@ -120,6 +141,67 @@ class PortedSection(ctk.CTkFrame):
                          font=theme.FONT_BODY_SMALL,
                          text_color=theme.TEXT_MUTED).pack(side="left")
 
+    # ── browsing a past day ─────────────────────────────────────────────────
+    def _build_history_picker(self, parent):
+        """Load a past day out of the log archives.
+
+        The live parser trims to 300 fights so it can run for hours without growing without
+        bound; everything older is still on disk. This re-reads a chosen day into a separate
+        parser and swaps it in behind the same tabs.
+        """
+        ctk.CTkLabel(parent, text="HISTORY", font=theme.FONT_BODY_SMALL,
+                     text_color=theme.TEXT_MUTED).pack(side="left", padx=(4, 8))
+        try:
+            days = history_load.available_days()
+        except Exception:
+            log.debug("could not list log days", exc_info=True)
+            days = []
+        vals = ["live"] + [d.strftime("%Y-%m-%d") for d in days]
+        self._day_menu = ctk.CTkOptionMenu(
+            parent, width=132, height=28, values=vals or ["live"],
+            fg_color=theme.PANEL, button_color=theme.PANEL_HOVER,
+            button_hover_color=theme.GOLD, text_color=theme.TEXT_PRIMARY,
+            dropdown_fg_color=theme.PANEL, dropdown_text_color=theme.TEXT_PRIMARY,
+            dropdown_hover_color=theme.PANEL_HOVER, font=theme.FONT_BODY_SMALL,
+            dropdown_font=theme.FONT_BODY_SMALL, corner_radius=7,
+            command=self._day_chosen)
+        self._day_menu.set("live")
+        self._day_menu.pack(side="left", padx=3)
+        self._day_note = ctk.CTkLabel(parent, text="", font=theme.FONT_BODY_SMALL,
+                                      text_color=theme.TEXT_MUTED)
+        self._day_note.pack(side="left", padx=8)
+
+    def _day_chosen(self, value):
+        if value == "live":
+            self.tail = self._live_feed
+            self._day_note.configure(text="", text_color=theme.TEXT_MUTED)
+            self._last_sig = None
+            self._rebuild(self.tabs.get())
+            return
+        try:
+            import datetime
+            day = datetime.datetime.strptime(value, "%Y-%m-%d").date()
+        except Exception:
+            return
+        self._day_note.configure(text="reading archives…", text_color=theme.GOLD)
+
+        def done(lc, note):
+            # Called on the WORKER thread -- bounce to the UI thread before touching widgets.
+            def apply():
+                if lc is None:
+                    self._day_note.configure(text=note, text_color=theme.DANGER)
+                    return
+                self.tail = _HistoryFeed(lc, note)
+                self._day_note.configure(text=note, text_color=theme.TEXT_MUTED)
+                self._last_sig = None
+                self._rebuild(self.tabs.get())
+            try:
+                self.after(0, apply)
+            except Exception:
+                pass
+
+        history_load.load_day(day, done)
+
     def _classes_changed(self, _=None):
         picked = [m.get() for m in self.menus]
         # Mutate IN PLACE -- the ported tabs hold a reference to this list, so rebinding the
@@ -135,7 +217,7 @@ class PortedSection(ctk.CTkFrame):
     # calls that closure. Building without invoking it renders a title and nothing else --
     # which is exactly what the first smoke test showed: 9 widgets for 80 loot events.
     _ATTR = {"Combat": "redraw_combat", "Healing": "redraw_healing", "Loot": "redraw_loot",
-             "Gear": "redraw_gear", "Codex": "redraw_codex"}
+             "Gear": "redraw_gear", "Codex": "redraw_codex", "DPS Test": "redraw_dps_test"}
 
     def _rebuild(self, name):
         tab = self.tabs.tab(name)
@@ -265,5 +347,6 @@ class CombatSection(PortedSection):
         super().__init__(
             master, app, feed,
             builders={"Combat": extra_views.tab_combat,
-                      "Healing": extra_views.tab_healing},
-            show_classes=False, show_overlay=True)
+                      "Healing": extra_views.tab_healing,
+                      "DPS Test": dps_test.tab_dps_test},
+            show_classes=False, show_overlay=True, show_history=True)

@@ -79,6 +79,10 @@ class CombatFeed:
         self.live_seen = False
         self.heal_zero = {"you": 0, "others": 0}
         self.heal_any = {"you": 0, "others": 0}
+        # Newest LOG timestamp seen, in the parser's own epoch. A benchmark run has to be
+        # bounded in LOG time, not wall-clock: priming replays history, and the two clocks
+        # are not the same thing.
+        self.last_ts = 0.0
         self._ts = None
         self._parse_ts = None
         self._ready = False
@@ -119,7 +123,10 @@ class CombatFeed:
             if not m:
                 return
             body, stamp = m.group("body"), m.group("ts")
-            self.lc.feed(body, self._parse_ts(stamp))
+            ts = self._parse_ts(stamp)
+            if ts > self.last_ts:
+                self.last_ts = ts
+            self.lc.feed(body, ts)
             if live:
                 self.live_seen = True
 
