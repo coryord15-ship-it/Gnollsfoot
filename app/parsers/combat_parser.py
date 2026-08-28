@@ -42,7 +42,11 @@ TS = re.compile(r"^\[(?P<ts>.{24})\]\s*(?P<body>.*)$")
 # new verb means adding the STEM, not the conjugation.
 MELEE_STEMS = ("slash", "crush", "bite", "smash", "bash", "hit", "kick",
                "punch", "pierce", "strike", "claw", "maul", "rend", "slice",
-               "gore", "burn", "freeze", "smite", "shoot", "cleave", "backstab")
+               "gore", "burn", "freeze", "smite", "shoot", "cleave", "backstab",
+               # "Endyr reaves a pledge familiar for 24 points of damage." -- 1,038
+               # hits in older logs going uncounted. Same defect as `frenzies` and
+               # `smite` before it: a real damage verb absent from the stem list.
+               "reave")
 # third person adds -s or -es; "hit"/"hits" and "bash"/"bashes" both have to work.
 MELEE_VERBS = tuple(v for stem in MELEE_STEMS
                     for v in (stem, stem + ("es" if stem.endswith(("s", "sh", "ch", "x", "z")) else "s")))
@@ -109,6 +113,32 @@ SKILL_VERBS = {"kick", "kicks", "bash", "bashes", "frenzy", "frenzies", "backsta
                "backstabs", "slam", "slams", "eagle strike", "tiger claw", "dragon punch",
                "flying kick", "round kick"}
 RANGED_VERBS = {"shoot", "shoots"}
+
+#: Monk Mend. The client's own string table (eqstr_us.txt) is authoritative here and gives
+#: EXACTLY three outcomes -- there is no separate "poor mend" message:
+#:     349  You magically mend your wounds and heal considerable damage.
+#:     350  You mend your wounds and heal some damage.
+#:     352  You have failed to mend your wounds.
+#:
+#: 🔴 NONE OF THEM STATE AN AMOUNT. Mend heals a PERCENTAGE of max health, and the log
+#: carries neither the percentage nor the player's max HP. So the COUNT and the TIER are
+#: measured facts; the healed HP is not derivable and must never be fabricated into a
+#: healing total. Owner's own estimate, explicitly uncertain: normal ~27%, considerable
+#: ~40% ("just because im not positive"). Kept as a labelled estimate, never as data.
+#: A rune soaking damage that would otherwise have landed on us. Mitigation, and until now
+#: completely invisible -- we counted damage dealt and damage taken, never damage PREVENTED.
+RX_RUNE_ABSORB = re.compile(
+    r"^You gain a rune for (?P<dmg>\d+) points? of absorption")
+
+#: Stun lockout. Owner's swing time is ~10% of fight wall-clock, and 21,000+ stun lines were
+#: unparsed -- this measures how much of that dead time is being stunned rather than choosing
+#: not to swing. Paired: "You are stunned!" -> "You are no longer stunned."
+RX_STUN_ON = re.compile(r"^You are stunned!")
+RX_STUN_OFF = re.compile(r"^You are no longer stunned")
+
+RX_MEND = re.compile(
+    r"^You (?P<good>magically )?mend your wounds and heal (?:considerable|some) damage"
+    r"|^You have (?P<failed>failed to mend) your wounds")
 
 UNATTRIBUTED = "(unattributed)"
 
@@ -261,6 +291,10 @@ RX_CHARM_BREAK = re.compile(
     r"|(?P<dst>.+?) (?:is no longer charmed|breaks free|has broken free|resumes attacking))")
 # "You begin casting Allure V." then the next "<mob> is charmed" ties the two together.
 RX_YOU_CAST = re.compile(r"^You begin casting (?P<spell>.+?)\.")
+#: ANY actor starting a cast. We only ever recorded our own, which is what makes proc-vs-cast
+#: work for the player -- but it left every groupmate's damage unsplittable and every enemy
+#: cast invisible. "You begin casting X." vs "Talenel begins casting X." -- both forms.
+RX_ANY_CAST = re.compile(r"^(?P<src>.+?) begins? casting (?P<spell>.+?)\.")
 
 MOD_CRIT = re.compile(r"\((?:[^)]*\b)?Critical", re.I)
 MOD_TOKENS = re.compile(r"\(([^)]+)\)")
@@ -299,6 +333,22 @@ class Actor:
     heal_attempted: int = 0
     heal_self: int = 0          # lifetap / self-sustain, kept OUT of group healing
     dmg_shield: int = 0        # damage shield ticks — small, but they are ours
+    # Monk Mend, counted by outcome. Heals a % of max HP that the log never states, so these
+    # are COUNTS only -- they are deliberately NOT added to any healing total.
+    mend_normal: int = 0
+    mend_good: int = 0
+    mend_failed: int = 0
+    # 🔴 "misses" conflated THREE different outcomes. Measured over 341,865 of the owner's
+    # swings: 133,165 true misses, 16,323 the TARGET dodging/parrying, 389 absorbed by a
+    # rune. Only the first is his accuracy; the second is the mob's avoidance and no amount
+    # of +hit fixes it. One number could not answer either question.
+    miss_clean: int = 0        # "but miss!"  -- our accuracy
+    avoided: int = 0           # target dodged / parried / blocked / riposted
+    absorbed: int = 0          # rune ate the swing entirely
+    # Damage prevented by a rune on US. Mitigation we were entirely blind to.
+    dmg_absorbed: int = 0
+    stun_events: int = 0       # times we were stunned
+    stunned_secs: float = 0.0  # measured lockout, stunned -> no longer stunned
     dmg_taken: int = 0
     best_hit: int = 0          # biggest single hit; nothing was tracking it
     # target -> [effective, attempted, casts, best single heal]. Healing totals
@@ -491,6 +541,7 @@ class LogParser:
         # cast it. Kept on the parser, not the fight: casting a spell once proves it is
         # castable for the whole session.
         self.cast_spells: set[str] = set()
+        self._stun_since: float = 0.0
         self.cur: Fight | None = None
         # one open encounter PER MOB, so chain-pulling does not merge them
         self.open: dict[str, Fight] = {}
@@ -684,6 +735,33 @@ class LogParser:
                       "dmg_spell", m.group("mods") or "", spell=m.group("spell") or "")
             return
 
+        m = RX_RUNE_ABSORB.match(body)
+        if m:
+            (self.cur or self._touch(ts, "You", "You")).actor("You").dmg_absorbed +=                 int(m.group("dmg"))
+            return
+
+        if RX_STUN_ON.match(body):
+            self._stun_since = ts
+            (self.cur or self._touch(ts, "You", "You")).actor("You").stun_events += 1
+            return
+        if RX_STUN_OFF.match(body):
+            if self._stun_since:
+                a = (self.cur or self._touch(ts, "You", "You")).actor("You")
+                a.stunned_secs += max(0.0, ts - self._stun_since)
+                self._stun_since = 0.0
+            return
+
+        m = RX_MEND.match(body)
+        if m:
+            a = (self.cur or self._touch(ts, "You", "You")).actor("You")
+            if m.group("failed"):
+                a.mend_failed += 1
+            elif m.group("good"):
+                a.mend_good += 1
+            else:
+                a.mend_normal += 1
+            return
+
         m = RX_SHIELD.match(body)
         if m:
             # Only OUR shield is ours. "YOU are pierced by <mob>'s thorns" is damage
@@ -701,6 +779,14 @@ class LogParser:
             f = self._touch(ts, m.group("dst"), m.group("src"))
             a = f.actor(m.group("src"))
             a.misses += 1
+            # Split WHY the swing did nothing -- see the Actor field comment.
+            how = (m.group("how") or "").lower()
+            if "absorb" in how:
+                a.absorbed += 1
+            elif any(w in how for w in ("dodge", "parr", "block", "riposte", "shield")):
+                a.avoided += 1
+            else:
+                a.miss_clean += 1
             if not a.first_ts:
                 a.first_ts = ts
             a.last_ts = ts
@@ -1105,6 +1191,15 @@ class LiveCombat(LogParser):
                 # dmg_spell lumps casts and item procs together. Both are one number in
                 # storage and FOUR different questions on screen, so split them here from
                 # the per-verb / per-spell ledgers rather than adding storage columns.
+                # Split the swing outcomes: our accuracy is a different problem from their
+                # avoidance, and one "hit chance" number answered neither.
+                "miss_clean": a.miss_clean if a else 0,
+                "avoided": a.avoided if a else 0,
+                "absorbed_swings": a.absorbed if a else 0,
+                "dmg_absorbed": a.dmg_absorbed if a else 0,
+                "stunned_secs": a.stunned_secs if a else 0.0,
+                "mend_normal": a.mend_normal if a else 0,
+                "mend_good": a.mend_good if a else 0,
                 "melee": self._weapon_dmg(a),
                 "skill": self._skill_dmg(a),
                 "ranged": self._ranged_dmg(a),

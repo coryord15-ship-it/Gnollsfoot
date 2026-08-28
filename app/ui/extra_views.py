@@ -1005,6 +1005,22 @@ def tab_combat(tab, app):
         out = [(k, f"{v:,}") for k, v in parts if v]
         out += [("hit chance", acc), ("crit", f"{r.get('crit_rate',0)*100:.0f}%"),
                 ("swings", f"{r['hits'] + r['misses']:,}")]
+        # "hit chance" alone blends OUR accuracy with THEIR avoidance. Measured across
+        # 341,865 swings: 133,165 true misses vs 16,323 dodged/parried by the target. Those
+        # are different problems -- more accuracy fixes one and nothing fixes the other.
+        if r.get("miss_clean"):
+            out.append(("you missed", f"{r['miss_clean']:,}"))
+        if r.get("avoided"):
+            out.append(("they avoided", f"{r['avoided']:,}"))
+        if r.get("absorbed_swings"):
+            out.append(("rune ate it", f"{r['absorbed_swings']:,}"))
+        if r.get("dmg_absorbed"):
+            out.append(("dmg runed off", f"{r['dmg_absorbed']:,}"))
+        if r.get("stunned_secs"):
+            out.append(("stun-locked", f"{r['stunned_secs']:.0f}s"))
+        # Mend heals a % of max HP the log never states, so COUNTS only -- never HP.
+        if r.get("mend_normal") or r.get("mend_good"):
+            out.append(("mend", f"{r.get('mend_normal',0)} + {r.get('mend_good',0)} superior"))
         out += [("best hit", f"{r.get('best_hit',0):,}"), ("avg hit", f"{r.get('avg_hit',0):.0f}"),
                 ("taken", f"{r.get('taken',0):,}")]
         if r.get("heal_effective"):
