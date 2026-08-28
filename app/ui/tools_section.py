@@ -217,6 +217,7 @@ class PortedSection(ctk.CTkFrame):
     # calls that closure. Building without invoking it renders a title and nothing else --
     # which is exactly what the first smoke test showed: 9 widgets for 80 loot events.
     _ATTR = {"Combat": "redraw_combat", "Healing": "redraw_healing", "Loot": "redraw_loot",
+             "Motes": "redraw_farm",
              "Gear": "redraw_gear", "Codex": "redraw_codex", "DPS Test": "redraw_dps_test"}
 
     def _rebuild(self, name):
@@ -324,6 +325,7 @@ class ToolsSection(PortedSection):
         super().__init__(
             master, app, feed,
             builders={"Loot": extra_views.tab_loot,
+                      "Motes": extra_views.tab_farm,
                       "Gear": extra_views.tab_gear,
                       "Codex": extra_views.tab_codex},
             show_classes=True, show_overlay=False)

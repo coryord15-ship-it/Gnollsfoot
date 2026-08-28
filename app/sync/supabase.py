@@ -168,6 +168,35 @@ class SupabaseSync:
             log.debug("Drop report failed: %s", e)
             return False
 
+    def submit_farm_report(self, rows: list) -> bool:
+        """POST pooled farming rates: [{zone, level_band, hours, kills, by_item}, ...].
+
+        Aggregate only. `FarmStats` never records a character name, a coordinate, a chat line
+        or a timestamp of play, so there is nothing identifying here to forward -- and levels
+        are BANDS ('10-19'), never exact, because exact level + zone + time identifies one
+        person once the contributor pool is small.
+
+        Note `www.`: the apex 308-redirects and any urllib caller raises on a 308 POST rather
+        than following it. `requests` would follow, but every call in this file targets www so
+        that nobody copying one of them inherits the trap.
+        """
+        if not self._client or not rows:
+            return False
+        try:
+            import requests as _req
+            r = _req.post(
+                "https://www.gnollguard.com/api/farm-report",
+                json={"client": "gnollguard-app", "rows": rows},
+                headers=self._auth_headers(),
+                timeout=15,
+            )
+            ok = 200 <= r.status_code < 300
+            log.info("Farm report: %d rows -> HTTP %d", len(rows), r.status_code)
+            return ok
+        except Exception as e:
+            log.debug("Farm report failed: %s", e)
+            return False
+
     def submit_vote(self, item_name: str, item_level: int,
                     vote_type: str, reason: str) -> bool:
         if not self._client:

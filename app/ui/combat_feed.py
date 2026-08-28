@@ -6,9 +6,15 @@ WHY THIS EXISTS
     would mean several readers of one file and several parsers that disagree about the same
     fight, so there is deliberately only one.
 
-OFFLINE ONLY. Owner, 2026-08-25: *"i dont want any of it public we are working soly offline
-mode."* Nothing here uploads, phones home, or reads anything but the game's own log file and
-the local snapshots under %LOCALAPPDATA%/GnollGuard/data.
+READS THE LOG, NOTHING ELSE. No packet capture, no hooking, no memory reading, no input
+simulation -- the game's own log file and the local snapshots under
+%LOCALAPPDATA%/GnollGuard/data, and that is the whole input surface. Permanent.
+
+⚠ This module still opens NO sockets. Sharing pooled farming rates is a separate, explicit
+step in `app/sync/supabase.py` that the user turns on -- parsing and uploading are kept apart
+on purpose so that reading a log can never imply sending one. (The "solely offline" rule this
+file used to cite was scoped to the closed beta; owner clarified 2026-08-28 that the shipped
+app is live for everyone. The parse/upload separation is NOT part of that relaxation.)
 """
 from __future__ import annotations
 
@@ -67,6 +73,9 @@ class CombatFeed:
 
     def __init__(self):
         self.lc = None
+        #: Drop rates by zone and level band. Rides the SAME reader as combat -- a second
+        #: tailer would disagree with this one about where you were standing.
+        self.farm = None
         self.loot: list[dict] = []          # newest first
         self.zone = ""
         # 🔴 Priming reads history, so `LiveCombat.current()` returns the last fight in the
@@ -101,6 +110,11 @@ class CombatFeed:
             except Exception:
                 log.debug("player name not resolved", exc_info=True)
             self.lc = LiveCombat()
+            try:
+                from app.farm_stats import FarmStats
+                self.farm = FarmStats()          # motes by default
+            except Exception:
+                log.debug("farm stats unavailable", exc_info=True)
             self._ts, self._parse_ts = TS, parse_ts
             self._mobs = datapaths.load("mobs.json", {})
             self._ready = True
@@ -169,6 +183,8 @@ class CombatFeed:
             if ts > self.last_ts:
                 self.last_ts = ts
             self.lc.feed(body, ts)
+            if self.farm is not None:
+                self.farm.feed(body, ts)
             if live:
                 self.live_seen = True
 

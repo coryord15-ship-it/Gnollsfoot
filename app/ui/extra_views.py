@@ -1175,3 +1175,106 @@ def tab_combat(tab, app):
                 w.bind("<Button-1>", lambda e, fn=pin: fn())
 
     app.redraw_combat = redraw
+
+
+# ══════════════════════════════════════════════════════════════════════════════════════════
+# FARMING RATES
+# ══════════════════════════════════════════════════════════════════════════════════════════
+
+#: Rates below this many hours are shown greyed, not hidden. Hiding them would quietly
+#: rewrite the table; greying says "this is real but thin" and lets the user judge.
+THIN_HOURS = 1.0
+
+
+def tab_farm(tab, app):
+    """Where motes actually drop, at what level, and how fast -- from this player's own log.
+
+    🔴 SORTED BY RATE, NEVER BY COUNT. A count measures how long you stood somewhere. This
+    project already ranked drop sources by count once and got it wrong; `hours` is shown on
+    every row so a big rate built on twenty minutes is visibly thin rather than authoritative.
+
+    ⚠ The instance is part of the zone. "The Castle of Mistmoore 4 (Refined)" measured 8.6
+    motes/hour against 1.0 for the plain castle over comparable time -- 8x, same castle. The
+    suffix is never normalized away.
+    """
+    head = card(tab)
+    head.pack(fill="x", padx=10, pady=(10, 4))
+    lab(head, "FARMING RATES", F_SMALL, GOLD).pack(fill="x", padx=12, pady=(10, 2))
+    wrap(head, "Motes per hour by zone and level, worked out from your own log — time is measured "
+               "from when you zone in to when you zone out, so it is real camp time. Sorted by "
+               "RATE, not by how many you found: a big number over twenty minutes is luck, not a "
+               "good spot, so the hours are always shown next to it. Instances are kept separate "
+               "on purpose — Mistmoore 4 (Refined) out-drops the plain castle roughly 8 to 1.",
+         T2).pack(fill="x", padx=12, pady=(0, 11))
+
+    ctrl = ctk.CTkFrame(tab, fg_color="transparent")
+    ctrl.pack(fill="x", padx=10, pady=(0, 4))
+    status = lab(ctrl, "", F_SMALL, T3)
+    status.pack(side="right", padx=(8, 4))
+
+    body = ctk.CTkScrollableFrame(tab, fg_color="transparent")
+    body.pack(fill="both", expand=True)
+
+    def _share():
+        """Send the aggregate. Shows exactly what would go, then sends only on a second press."""
+        fs = getattr(app.tail, "farm", None) if app.tail else None
+        rows = fs.submission() if fs else []
+        if not rows:
+            status.configure(text="nothing worth sharing yet", text_color=T3)
+            return
+        if getattr(share_btn, "_armed", False):
+            share_btn._armed = False
+            share_btn.configure(text="Share my rates")
+            sb = getattr(app, "supabase", None)
+            ok = bool(sb and sb.submit_farm_report(rows))
+            status.configure(text="shared %d zones" % len(rows) if ok else "share failed — not logged in?",
+                             text_color=OK if ok else BAD)
+            return
+        # First press only ARMS it. Consent without disclosure is not consent, so the user
+        # sees the row count and what a row contains before anything leaves the machine.
+        share_btn._armed = True
+        share_btn.configure(text="Send %d zones?" % len(rows))
+        status.configure(text="zone · level band · hours · kills · items. No name, no chat, no log lines.",
+                         text_color=WARN)
+
+    share_btn = ctk.CTkButton(ctrl, text="Share my rates", width=130, height=24, corner_radius=6,
+                              font=F_SMALL, command=_share)
+    share_btn.pack(side="left", padx=(2, 6))
+
+    def redraw():
+        clear(body)
+        fs = getattr(app.tail, "farm", None) if app.tail else None
+        rows = fs.rows(min_hours=0.25) if fs else []
+        if not rows:
+            lab(body, "no motes logged yet — play a while and this fills in", F_BODY, T3).pack(padx=12, pady=12)
+            return
+
+        tot_h = sum(r["hours"] for r in rows)
+        tot_d = sum(r["drops"] for r in rows)
+        lab(body, "%d motes over %.1f hours — %.2f/hr overall"
+                  % (tot_d, tot_h, (tot_d / tot_h) if tot_h else 0.0),
+            F_SMALL, T3).pack(fill="x", padx=12, pady=(6, 8))
+
+        for r in rows[:40]:
+            thin = r["hours"] < THIN_HOURS
+            c = card(body)
+            c.pack(fill="x", padx=10, pady=3)
+            top = ctk.CTkFrame(c, fg_color="transparent")
+            top.pack(fill="x", padx=12, pady=(9, 1))
+            lab(top, r["zone"], F_BODY, T3 if thin else T1).pack(side="left")
+            lab(top, "%.2f/hr" % r["per_hour"], F_BODY, T3 if thin else GOLD).pack(side="right")
+
+            sub = ctk.CTkFrame(c, fg_color="transparent")
+            sub.pack(fill="x", padx=12, pady=(0, 9))
+            lab(sub, "levels %s · %.1f hours · %d kills"
+                     % (r["level_band"], r["hours"], r["kills"]), F_SMALL, T3).pack(side="left")
+            if thin:
+                # Say why it is greyed rather than leaving the user to guess.
+                lab(sub, "thin sample", F_SMALL, WARN).pack(side="right")
+
+            items = ", ".join("%s x%d" % (k, v) for k, v in list(r["by_item"].items())[:4])
+            if items:
+                wrap(c, items, T2, width=560).pack(fill="x", padx=12, pady=(0, 9))
+
+    app.redraw_farm = redraw
+    redraw()
