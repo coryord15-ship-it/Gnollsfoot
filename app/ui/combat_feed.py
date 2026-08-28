@@ -73,6 +73,12 @@ class CombatFeed:
 
     def __init__(self):
         self.lc = None
+        #: The player's own character name, lowercased, resolved from the log at start().
+        #: 🔴 This used to be the literal string "morbid". EQ writes self-heals under the
+        #: character's NAME as often as under "You", so a hardcoded name meant every user who
+        #: was not the author had their own heals bucketed as healing OTHERS -- and so did the
+        #: author's own second character. Never hardcode the player.
+        self.me = ""
         #: Drop rates by zone and level band. Rides the SAME reader as combat -- a second
         #: tailer would disagree with this one about where you were standing.
         self.farm = None
@@ -107,6 +113,7 @@ class CombatFeed:
                 who = player_name_from_log(log_path or "")
                 if who:
                     set_player_name(who)
+                    self.me = who.strip().lower()
             except Exception:
                 log.debug("player name not resolved", exc_info=True)
             self.lc = LiveCombat()
@@ -194,7 +201,8 @@ class CombatFeed:
 
             h = RX_HEAL_ANY.match(body)
             if h:
-                who = "you" if h.group("src").strip().lower() in ("you", "morbid") else "others"
+                src = h.group("src").strip().lower()
+                who = "you" if src == "you" or (self.me and src == self.me) else "others"
                 self.heal_any[who] += 1
                 if int(h.group("eff")) == 0:
                     self.heal_zero[who] += 1
