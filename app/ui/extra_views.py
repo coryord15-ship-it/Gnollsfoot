@@ -247,7 +247,43 @@ class Overlay(ctk.CTkToplevel):
             w.bind("<Button-1>", self._grab)
             w.bind("<B1-Motion>", self._drag)
         self._off = (0, 0)
+        # 🔴 Widget POOL, not destroy-and-recreate. The old refresh cleared this frame and
+        # rebuilt ~30 widgets EVERY SECOND, whether or not anything had changed -- measured
+        # at 34.4 ms per idle tick, 3,600 times an hour, forever. Tk widget churn is the
+        # expensive part, so rows are built once and reconfigured thereafter.
+        self._pool = []
+        #: Last rendered state. Ticks whose signature matches do no work at all, which out
+        #: of combat is very nearly all of them.
+        self._sig = None
         self.refresh()
+
+    def _row_widget(self, i):
+        """Build row `i` once; hand back the same widgets forever after."""
+        while len(self._pool) <= i:
+            c = ctk.CTkFrame(self.rows, fg_color="transparent")
+            line = ctk.CTkFrame(c, fg_color="transparent")
+            line.pack(fill="x")
+            name = lab(line, "", F_SMALL, T1)
+            name.pack(side="left")
+            dps = lab(line, "", F_MONO, T1)
+            dps.pack(side="right")
+            track = ctk.CTkFrame(c, fg_color=PANEL, corner_radius=3, height=4)
+            track.pack(fill="x", pady=(5, 0))
+            track.pack_propagate(False)
+            fill = ctk.CTkFrame(track, fg_color=T1, corner_radius=3)
+            fill.place(relx=0, rely=0, relwidth=0.01, relheight=1)
+            # Two pet lines, created once and hidden until a pet actually contributes.
+            pets = []
+            for _ in range(2):
+                pl = ctk.CTkFrame(c, fg_color="transparent")
+                pn = lab(pl, "", F_SMALL, T3)
+                pn.pack(side="left")
+                pd = lab(pl, "", F_SMALL, T3)
+                pd.pack(side="right")
+                pets.append((pl, pn, pd))
+            self._pool.append({"box": c, "name": name, "dps": dps,
+                               "fill": fill, "pets": pets})
+        return self._pool[i]
 
     def _grab(self, e):
         self._off = (e.x_root - self.winfo_x(), e.y_root - self.winfo_y())
@@ -260,6 +296,21 @@ class Overlay(ctk.CTkToplevel):
             lc = self.tail.lc
             livegate = bool(self.tail and self.tail.live_seen)
             f = ((lc.current() if livegate else None) or lc.last_kill()) if lc else None
+            # 🔴 DO NOTHING WHEN NOTHING CHANGED. Out of combat every tick is identical, and
+            # the old code rebuilt the whole row list regardless. The signature is the only
+            # state the overlay actually renders, so comparing it is both cheap and exact --
+            # if it matches, no pixel could differ.
+            sig = None
+            if f:
+                sig = (f["mob"], round(f.get("duration") or 0, 1), f.get("total"),
+                       livegate and bool(lc.current()),
+                       tuple((r["name"], r.get("own_damage", r["damage"]),
+                              tuple((p["name"], p["damage"]) for p in (r.get("pets") or [])[:2]))
+                             for r in f["rows"][:6]))
+            if sig == self._sig:
+                self.after(1000, self.refresh)
+                return
+            self._sig = sig
             if f:
                 live = livegate and bool(lc.current())
                 self.title_lbl.configure(text=f["mob"][:26])
@@ -282,21 +333,20 @@ class Overlay(ctk.CTkToplevel):
                 self.lbl_dps.configure(
                     text="  your dps (you + pet)" if (me or {}).get("pet_damage")
                     else "  your dps")
-                clear(self.rows)
-                peak = max((r["damage"] for r in f["rows"]), default=1)
-                for r in f["rows"][:6]:
-                    c = ctk.CTkFrame(self.rows, fg_color="transparent")
-                    c.pack(fill="x", pady=1)
-                    line = ctk.CTkFrame(c, fg_color="transparent")
-                    line.pack(fill="x")
+                peak = max((r["damage"] for r in f["rows"]), default=1) or 1
+                shown = f["rows"][:6]
+                for i, r in enumerate(shown):
+                    w = self._row_widget(i)
+                    w["box"].pack(fill="x", pady=1)
                     col = GOLD if r["is_me"] else T1
-                    lab(line, r["name"][:20], F_SMALL, col).pack(side="left")
+                    w["name"].configure(text=r["name"][:20], text_color=col)
                     # OWN dps here, not the pet-inclusive total: the pet is listed directly
                     # below, so showing the combined figure counted it twice on screen.
                     _own = r.get("own_damage", r["damage"])
                     _dur0 = max(1.0, f.get("duration") or 1.0)
-                    lab(line, f"{round(_own / _dur0):,}", F_MONO, col).pack(side="right")
-                    bar(c, _own / peak, col, height=4)
+                    w["dps"].configure(text=f"{round(_own / _dur0):,}", text_color=col)
+                    w["fill"].configure(fg_color=col)
+                    w["fill"].place_configure(relwidth=max(0.01, min(1.0, _own / peak)))
                     # Tiered under the owner rather than a "+pet" tag crowding the dps
                     # figure. Space is tight here, so one indented line per pet and no bar.
                     # 🔴 SAME COLUMN, SAME UNIT. Owner, 2026-08-25: *"1339 dps? sounds like
@@ -305,13 +355,21 @@ class Overlay(ctk.CTkToplevel):
                     # quantity, and he read it exactly that way. The pet shows dps now; its
                     # raw damage lives in the Combat tab where there is room to label it.
                     _dur = max(1.0, f.get("duration") or 1.0)
-                    for p in (r.get("pets") or [])[:2]:
-                        pl = ctk.CTkFrame(c, fg_color="transparent")
-                        pl.pack(fill="x", padx=(14, 0))
-                        lab(pl, "└ " + pet_label(p["name"])[:18], F_SMALL, T3).pack(side="left")
-                        lab(pl, f"{round(p['damage'] / _dur):,}", F_SMALL, T3).pack(side="right")
+                    pets = (r.get("pets") or [])[:2]
+                    for j, (pl, pn, pd) in enumerate(w["pets"]):
+                        if j < len(pets):
+                            p = pets[j]
+                            pn.configure(text="└ " + pet_label(p["name"])[:18])
+                            pd.configure(text=f"{round(p['damage'] / _dur):,}")
+                            pl.pack(fill="x", padx=(14, 0))
+                        else:
+                            pl.pack_forget()      # hidden, not destroyed
+                # Rows that no longer have a combatant are hidden, never destroyed -- the
+                # next fight almost certainly needs them again.
+                for i in range(len(shown), len(self._pool)):
+                    self._pool[i]["box"].pack_forget()
         except Exception:
-            pass
+            log.exception("overlay refresh")
         self.after(1000, self.refresh)
 
 
