@@ -1216,19 +1216,17 @@ def tab_farm(tab, app):
     body.pack(fill="both", expand=True)
 
     def _share():
-        """Send the aggregate. Shows exactly what would go, then sends only on a second press."""
-        fs = getattr(app.tail, "farm", None) if app.tail else None
-        rows = fs.submission() if fs else []
+        """Send the increment since last time. Arms on the first press, sends on the second."""
+        from app.ui import farm_share
+        rows = farm_share.pending(getattr(app.tail, "farm", None) if app.tail else None)
         if not rows:
-            status.configure(text="nothing worth sharing yet", text_color=T3)
+            status.configure(text="nothing new since your last share", text_color=T3)
             return
         if getattr(share_btn, "_armed", False):
             share_btn._armed = False
             share_btn.configure(text="Share my rates")
-            sb = getattr(app, "supabase", None)
-            ok = bool(sb and sb.submit_farm_report(rows))
-            status.configure(text="shared %d zones" % len(rows) if ok else "share failed — not logged in?",
-                             text_color=OK if ok else BAD)
+            ok, why = farm_share.send_now(app, force=True)
+            status.configure(text=why, text_color=OK if ok else BAD)
             return
         # First press only ARMS it. Consent without disclosure is not consent, so the user
         # sees the row count and what a row contains before anything leaves the machine.
@@ -1237,9 +1235,26 @@ def tab_farm(tab, app):
         status.configure(text="zone · level band · hours · kills · items. No name, no chat, no log lines.",
                          text_color=WARN)
 
+    def _toggle():
+        """Automatic sharing every 6 hours. Off by default; the user turns it on."""
+        from app.ui import farm_share
+        on = not farm_share.enabled()
+        farm_share.set_enabled(on)
+        auto_btn.configure(text="Auto-share: ON" if on else "Auto-share: off")
+        status.configure(
+            text=("sends what is new every 6 hours — never per drop"
+                  if on else "automatic sharing off; the button still works"),
+            text_color=OK if on else T3)
+
     share_btn = ctk.CTkButton(ctrl, text="Share my rates", width=130, height=24, corner_radius=6,
                               font=F_SMALL, command=_share)
     share_btn.pack(side="left", padx=(2, 6))
+
+    from app.ui import farm_share as _fs
+    auto_btn = ctk.CTkButton(ctrl, text="Auto-share: ON" if _fs.enabled() else "Auto-share: off",
+                             width=126, height=24, corner_radius=6, font=F_SMALL,
+                             fg_color=PANEL, hover_color=HOVER, command=_toggle)
+    auto_btn.pack(side="left", padx=(0, 6))
 
     def redraw():
         clear(body)

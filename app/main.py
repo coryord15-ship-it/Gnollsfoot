@@ -1956,6 +1956,15 @@ def main():
         pass
     _force_window_visible(win)
 
+    # Pooled farming rates. Opt-in and OFF by default; when on it sends only the increment
+    # since the last successful send, every 6 hours -- never per drop. Arming the timer is
+    # harmless when sharing is off: the tick reads a flag and returns.
+    try:
+        from app.ui import farm_share
+        farm_share.start_timer(win)
+    except Exception:
+        log.debug("farm share timer not armed", exc_info=True)
+
     log.info("GnollGuard started")
     win.mainloop()
 

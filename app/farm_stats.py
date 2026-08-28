@@ -156,18 +156,54 @@ class FarmStats:
             })
         return sorted(out, key=lambda r: -r["per_hour"])
 
-    def submission(self, min_hours: float = 0.25) -> list:
+    def submission(self, min_hours: float = 0.25, baseline: dict | None = None) -> list:
         """Aggregate rows safe to share: no names, no timestamps, no log text.
 
+        🔴 PASS A BASELINE OR YOU WILL DOUBLE-COUNT. These figures are CUMULATIVE over
+        everything the parser has read, which is the whole log history. Sending them twice
+        inserts the same hours twice, and the pooled reader sums hours across rows -- so a
+        second send of a 280-hour history reads as 565 hours of farming that never happened.
+        ⚠ The per-hour RATE survives that, because hours and drops inflate together -- which
+        is exactly why it goes unnoticed. What breaks is everything built on the hours: a
+        repeat sender's experience is weighted twice in the pooled average, `min_hours`
+        confidence filters pass zones that have not earned it, and the hours column -- the one
+        thing telling a reader how much evidence is behind a number -- is a lie.
+
+        `baseline` is the snapshot from the last SUCCESSFUL send. Only the increment since
+        then is returned, which is what keeps "one row = one contributor's time in one cell"
+        actually true rather than merely intended.
+
         `min_hours` drops slivers that would publish a meaningless rate -- a single kill in a
-        zone is not evidence about that zone, and pooling many of them would create confident
+        zone is not evidence about that zone, and pooling many of them would be confident
         nonsense at scale.
         """
-        return [{
-            "zone": r["zone"],
-            "level_band": r["level_band"],
-            "hours": r["hours"],
-            "kills": r["kills"],
-            "drops": r["drops"],
-            "by_item": r["by_item"],
-        } for r in self.rows(min_hours=min_hours) if r["drops"]]
+        base = baseline or {}
+        out = []
+        for r in self.rows(min_hours=0.0):
+            key = "%s|%s" % (r["zone"], r["level_band"])
+            b = base.get(key) or {}
+            hours = round(r["hours"] - float(b.get("hours", 0.0)), 2)
+            kills = r["kills"] - int(b.get("kills", 0))
+            bi = {}
+            for item, n in r["by_item"].items():
+                d = n - int((b.get("by_item") or {}).get(item, 0))
+                if d > 0:
+                    bi[item] = d
+            # A cell with no NEW drops is not news, and a non-positive delta means the log
+            # was rotated or replaced -- skip rather than send a negative.
+            if hours < min_hours or not bi:
+                continue
+            out.append({"zone": r["zone"], "level_band": r["level_band"],
+                        "hours": hours, "kills": max(0, kills), "by_item": bi})
+        return out
+
+    def snapshot(self) -> dict:
+        """Everything counted so far, as the baseline for the next `submission()`.
+
+        Only ever persist this after a send actually SUCCEEDED. Saving it on a failed send
+        would silently discard that window forever -- the data is gone from the pool and
+        nothing reports an error.
+        """
+        return {"%s|%s" % (r["zone"], r["level_band"]):
+                {"hours": r["hours"], "kills": r["kills"], "by_item": r["by_item"]}
+                for r in self.rows(min_hours=0.0)}
