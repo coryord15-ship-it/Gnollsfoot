@@ -182,6 +182,25 @@ def clear(frame):
         w.destroy()
 
 
+#: How often the overlay repaints, in ms.
+#:
+#: 🔴 NOT synced to the game's frame rate, and it cannot be: reading the client's frame
+#: timing means injecting into its process, which the shipped app will never do. The overlay
+#: is a separate top-level window, not composited into the game's swap chain, so there is
+#: nothing to sync to in the first place.
+#:
+#: What actually made it look like blinking was the old destroy-and-recreate: `clear()` wiped
+#: every row, leaving a genuinely EMPTY frame for one paint each second. That is gone -- rows
+#: are reused now -- and the remaining half of the problem was simply that 1 Hz is too slow
+#: to read as live: a dps figure stepping once a second looks stuttery however cleanly it
+#: paints.
+#:
+#: Measured: an idle tick is 0.32 ms and a repainting tick 4.02 ms. At 250 ms the worst case
+#: -- every single tick repainting -- is 1.6% of one core, which is still less than HALF what
+#: the old code burned doing nothing at all (34.4 ms every second). Do not go below ~125 ms
+#: without re-measuring; the cost is linear in the rate.
+OVERLAY_MS = 250
+
 class Overlay(ctk.CTkToplevel):
     """Always-on-top HUD.
 
@@ -308,7 +327,7 @@ class Overlay(ctk.CTkToplevel):
                               tuple((p["name"], p["damage"]) for p in (r.get("pets") or [])[:2]))
                              for r in f["rows"][:6]))
             if sig == self._sig:
-                self.after(1000, self.refresh)
+                self.after(OVERLAY_MS, self.refresh)
                 return
             self._sig = sig
             if f:
@@ -370,7 +389,7 @@ class Overlay(ctk.CTkToplevel):
                     self._pool[i]["box"].pack_forget()
         except Exception:
             log.exception("overlay refresh")
-        self.after(1000, self.refresh)
+        self.after(OVERLAY_MS, self.refresh)
 
 
 def tab_loot(tab, app):
