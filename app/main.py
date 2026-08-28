@@ -497,8 +497,8 @@ class AppState:
         where it went. A renamed file in the folder they are already looking at does
         not. So rotate_to() gets an empty archive_dir and renames beside the original:
 
-            eqlog_Morbid_freeport.txt
-            eqlog_Morbid_freeport_2026-07-11_to_2026-08-07.bak
+            eqlog_<Char>_<server>.txt
+            eqlog_<Char>_<server>_<from>_to_<to>.bak
 
         Kept as a method (rather than deleted) because LogRotator resolves the
         archive dir on every rotation, and a future "archive to a chosen folder"

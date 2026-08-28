@@ -289,7 +289,7 @@ class LogWatcher:
     def archive_name_for(cls, path: str) -> str:
         r"""The archived filename: original stem + the date range it covers.
 
-        eqlog_Morbid_freeport.txt  ->  eqlog_Morbid_freeport_2026-07-11_to_2026-08-07.bak
+        eqlog_<Char>_<server>.txt  ->  eqlog_<Char>_<server>_<from>_to_<to>.bak
 
         Owner asked for the span readable at a glance and tied to the original name
         (2026-08-08). ISO dates rather than US: they sort chronologically in the
@@ -638,7 +638,7 @@ class LogWatcher:
             # Verified 2026-08-04 by driving the real collector: player speaks →
             # you /say → they speak again inside the conversation gap → queued.
             # Drop anything we can PROVE is a player (roster hit, or a truncation
-            # of one — `ntis` is `Dragantis`). Publishing has a stricter,
+            # of one — `ntis` is `<GuildMember>`). Publishing has a stricter,
             # deny-by-default check of its own; this one only removes what is
             # certain, so quest matching keeps working. See player_roster.py.
             if self.roster.is_player(dialogue.npc_name):

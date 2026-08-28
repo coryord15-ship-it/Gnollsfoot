@@ -43,7 +43,7 @@ TS = re.compile(r"^\[(?P<ts>.{24})\]\s*(?P<body>.*)$")
 MELEE_STEMS = ("slash", "crush", "bite", "smash", "bash", "hit", "kick",
                "punch", "pierce", "strike", "claw", "maul", "rend", "slice",
                "gore", "burn", "freeze", "smite", "shoot", "cleave", "backstab",
-               # "Endyr reaves a pledge familiar for 24 points of damage." -- 1,038
+               # "<Player> reaves a pledge familiar for 24 points of damage." -- 1,038
                # hits in older logs going uncounted. Same defect as `frenzies` and
                # `smite` before it: a real damage verb absent from the stem list.
                "reave")
@@ -93,7 +93,7 @@ RX_DOT = re.compile(
 
 # 🔴 FRENZY WAS INVISIBLE — 1,103 hits in one 12 MB slice (993 plain, 100 Critical,
 # 10 Finishing Blow). It is a Berserker SKILL and the log writes it with a preposition:
-#     "Zuuluu frenzies on an initiate familiar for 84 points of damage."
+#     "<Player> frenzies on an initiate familiar for 84 points of damage."
 # RX_MELEE expects "<verb> <target>", so "frenzies on" never matched and every point of
 # Frenzy damage went uncounted. Kept as its own pattern rather than loosening RX_MELEE,
 # which would let the non-greedy source group swallow a word on every ordinary swing.
@@ -246,7 +246,7 @@ RX_PET = re.compile(r"^(?P<owner>.+?)[`'](?:s)? pet$", re.I)
 # ⚠ BARD CHARM SONGS CARRY NO CHARM WORD. The keyword list below catches every caster charm
 # (Allure / Charm / Beguile / Dominate ...), but a bard's are named after bards: "Solon's
 # Bewitching Bravura", "Solon's Song of the Sirens", "Largo's Melodic Binding". Measured in
-# our own logs: Imperia singing Bewitching Bravura appears 135 times, and every pet charmed
+# our own logs: a grouped bard singing Bewitching Bravura appears 135 times, and every pet charmed
 # that way was being credited to the ENEMY side of the fight.
 #
 # Named explicitly because no rule derives them from the text -- a new bard charm has to be
@@ -437,8 +437,8 @@ class Fight:
 
 
 # The character the log belongs to. EQ writes the player as "You" when they act, but
-# names them outright in some lines — "You healed Morbid for 42 hit points by Lifedraw."
-# Without knowing that Morbid IS You, that parses as healing a DIFFERENT actor.
+# names them outright in some lines — "You healed <YourName> for 42 hit points by Lifedraw."
+# Without knowing that <YourName> IS You, that parses as healing a DIFFERENT actor.
 #
 # 🔴 MEASURED 2026-08-23, and it is not cosmetic: on one 12 MB slice it split the owner
 # into two actors, credited him with 92,657 of GROUP HEALING that is really lifetap
@@ -833,7 +833,7 @@ class LogParser:
         m = RX_HEAL.match(body)
         if m:
             # 🔴 Resolve the target BEFORE opening a fight on it. The raw dst can be a
-            # PRONOUN ("healed himself") or carry a HoT suffix ("Zuuluu over time"), and
+            # PRONOUN ("healed himself") or carry a HoT suffix ("<Healer> over time"), and
             # _touch() names the fight after whatever it is handed. Measured 2026-08-23:
             # 64 of 300 "fights" were one-second phantoms named `himself`, `herself`,
             # `itself` — created by nearby players self-healing, nothing to do with us.
@@ -868,7 +868,7 @@ class LogParser:
             # every mob and every player into one component and mark the raid boss
             # friendly. They are self-heals: drop them.
             src, dst = m.group("src"), m.group("dst")
-            # Pronoun form, OR the same actor under two names ("You healed Morbid").
+            # Pronoun form, OR the same actor under two names ("You healed <YourName>").
             # canon_actor folds the character name into "You", so compare canonically.
             selfheal = (dst.lower() in ("himself", "herself", "itself",
                                         "themselves", "themself")
@@ -887,15 +887,15 @@ class LogParser:
                 # mobs lifetap too, and crediting that as friendliness is what put the
                 # raid boss on our own side in the first version.
                 a.heal_self += eff
-            # "X healed Morbid over time for N" is a HEAL-OVER-TIME line; without this the
-            # target parses as the actor "Morbid over time".
+            # "X healed <YourName> over time for N" is a HEAL-OVER-TIME line; without this the
+            # target parses as the actor "<YourName> over time".
             if dst.lower().endswith(" over time"):
                 dst = dst[: -len(" over time")]
 
             # 🔴 PER-TARGET LEDGER GOES HERE, NOT EARLIER. dst is only trustworthy after
             # the two rewrites above: "healed himself" resolves to the caster, and a
             # heal-over-time tick arrives as "<name> over time". Recording before them
-            # produced literal targets called "himself" and "Zuuluu over time" — a healer
+            # produced literal targets called "himself" and "<Healer> over time" — a healer
             # split across three phantom people. Found 2026-08-23 the first time the
             # healing view was rendered.
             _t = canon_actor(dst)

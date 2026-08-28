@@ -68,7 +68,7 @@ class CombatView(ctk.CTkFrame):
             from app.parsers.combat_parser import (LiveCombat, TS, parse_ts,
                                                     set_player_name, player_name_from_log)
             # 🔴 Teach the parser which character IS "You" before a single line lands.
-            # EQ names the player outright in some lines ("You healed Morbid for 42 hit
+            # EQ names the player outright in some lines ("You healed <YourName> for 42 hit
             # points by Lifedraw"), and without this that reads as healing a DIFFERENT
             # actor: it splits the player in two AND books lifetap self-sustain as group
             # healing. Measured on a 12 MB slice — 91% of "healing" was self-sustain.

@@ -74,7 +74,7 @@ class CombatFeed:
     def __init__(self):
         self.lc = None
         #: The player's own character name, lowercased, resolved from the log at start().
-        #: 🔴 This used to be the literal string "morbid". EQ writes self-heals under the
+        #: 🔴 This used to be a hardcoded character name. EQ writes self-heals under the
         #: character's NAME as often as under "You", so a hardcoded name meant every user who
         #: was not the author had their own heals bucketed as healing OTHERS -- and so did the
         #: author's own second character. Never hardcode the player.
@@ -107,7 +107,7 @@ class CombatFeed:
         try:
             from app.parsers.combat_parser import (LiveCombat, TS, parse_ts,
                                                    set_player_name, player_name_from_log)
-            # Without this the player splits into two actors ("You" and "Morbid") and
+            # Without this the player splits into two actors ("You" and "<YourName>") and
             # lifetap self-sustain books as group healing -- measured at 91% of the total.
             try:
                 who = player_name_from_log(log_path or "")

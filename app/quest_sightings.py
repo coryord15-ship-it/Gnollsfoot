@@ -20,7 +20,7 @@ Five things make that work:
 
 1. CONTENT HASH AS THE ID. Every line becomes
    ``line_id = sha1(npc + "|" + normalised_text)[:12]``. Normalising strips the player's own
-   name (NPCs say "Greetings, Morbid"), lowercases and collapses whitespace. Two players who
+   name (NPCs say "Greetings, <YourName>"), lowercases and collapses whitespace. Two players who
    hear the same line compute the SAME id independently — no server round-trip, no sequence
    allocation, no coordination.
 
@@ -89,7 +89,7 @@ _RACE_RE = re.compile(rf"\b({_RACES})\b", re.I)
 def _norm(text: str, player="") -> str:
     """Normalise a line so the same sentence hashes identically for every player.
 
-    NPCs address you by name ("Greetings, Morbid.") AND by race ("hail yourself, ogre!") —
+    NPCs address you by name ("Greetings, <YourName>.") AND by race ("hail yourself, ogre!") —
     left in, one quest becomes N near-identical rows, one per player name/race that heard it.
 
     `player` may be a single name OR an iterable of names. The app watches EVERY character

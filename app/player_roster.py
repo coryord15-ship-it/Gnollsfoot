@@ -38,7 +38,7 @@ list, which is the exact failure this module prevents. Do not add it back.
 TRUNCATIONS MATTER AS MUCH AS THE ROSTER
 ----------------------------------------
 Decoded/garbled names arrive shortened: `ntis`/`antis`/`agantis`/`ragantis` are
-all `Dragantis`, a guild member. `hiad` is `Adlewyrchiad` — and `hiad` is the
+all one guild member's name. `hiad` is that player's full name — and `hiad` is the
 name that "said" *"Anyone around level 14 want to group?"*. A plain roster
 lookup lets all four through, so suffix/prefix matching is part of the check,
 not a refinement of it.
@@ -198,7 +198,7 @@ class PlayerRoster:
                 return True
             if len(n) < _MIN_TRUNCATION:
                 return False
-            # `ntis` -> `dragantis`, `rbid` -> `morbid`, `hiad` -> `adlewyrchiad`
+            # `ntis` -> `<fullname>`, `rbid` -> `<yourname>`, `hiad` -> `<fullname2>`
             for p in self._players:
                 if p != n and len(p) > len(n) and (p.endswith(n) or p.startswith(n)):
                     return True
