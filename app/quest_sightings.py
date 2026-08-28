@@ -37,7 +37,7 @@ Five things make that work:
 
 5. DURABLE QUEUE + BATCHED UPLOAD. Every kept line is appended to disk THE INSTANT it's seen,
    then uploaded in batches on app open, on close, and on a slow timer. Writing first means a
-   crash or power cut loses nothing — the same pattern that carried the devkit through a real
+   crash or power cut loses nothing — a pattern proven through a real
    outage with zero loss. A byte offset tracks what's been sent, so replays are free.
 
 PRIVACY: only the NPC's name, the NPC's words, and the zone are ever uploaded. The player's
@@ -80,7 +80,7 @@ _REWARD = re.compile(
 # NPCs interpolate the player's RACE as well as their name — proven in real EQL logs:
 #   "hail yourself, ogre! i hope you're here to [help]..." vs the same line to a barbarian.
 # Same logical line, two hashes, two rows unless we normalise race out too. MUST match
-# devtool/log_quest_hails.py exactly, or app and devkit findings stop merging.
+# the hail-logging format exactly, or findings stop merging.
 _RACES = (r"human|barbarian|erudite|wood elf|high elf|dark elf|half elf|halfling|dwarf|"
           r"troll|ogre|gnome|iksar|vah shir|froglok|drakkin")
 _RACE_RE = re.compile(rf"\b({_RACES})\b", re.I)
@@ -268,7 +268,7 @@ class QuestSightingCollector:
     # ── durable queue ─────────────────────────────────────────────────────────
     def _append(self, row: dict) -> None:
         """Write to disk immediately. Never hold a finding only in memory — a crash or power
-        cut must not cost us data (the devkit learned this the hard way)."""
+        cut must not cost us data (learned the hard way)."""
         try:
             with self._lock:
                 with open(self.queue_path, "a", encoding="utf-8") as fh:

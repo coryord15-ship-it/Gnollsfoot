@@ -1,7 +1,7 @@
 r"""Combat parser for the GnollGuard Companion overlay — EverQuest Legends.
 
-MOVED HERE 2026-08-21 from devtool/dps_parser.py, at the owner's request to combine the
-DPS parser with the Companion rather than keep a separate devkit tool. The parsing logic
+MOVED HERE 2026-08-21 at the owner's request, to combine the DPS parser with the
+Companion rather than keep a separate tool. The parsing logic
 below is carried across UNCHANGED and deliberately so: `resolve_friendly()` and the
 second-person melee verbs are both MEASURED corrections to real bugs (a heal-graph that
 put the raid boss on our own DPS chart; a verb list that matched 0 of the owner's own

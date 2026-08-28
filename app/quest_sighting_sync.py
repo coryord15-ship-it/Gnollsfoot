@@ -15,7 +15,7 @@ Two jobs:
    Sends the queue in batches, tracking a BYTE OFFSET of what's been pushed. Uploading is
    therefore idempotent and resumable: if the app dies mid-send, the next run picks up from
    the same offset, and the server upserts on line_id so a duplicate batch costs nothing.
-   Same shape as devtool/capture_publisher.py, which carried the devkit through a real power
+   The same durable-offset shape proven through a real power
    cut without losing a row.
 
 Runs on background threads and fails silent — a community-data upload must never interrupt

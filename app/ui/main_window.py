@@ -188,7 +188,7 @@ class MainWindow(ctk.CTk):
         except Exception:
             import logging
             logging.getLogger(__name__).exception("combat tab failed to build")
-        # Tools — the devkit tabs (Healing / Loot / Gear / Codex) plus the overlay, merged
+        # Tools — Healing / Loot / Gear / Codex plus the overlay, merged
         # in on 2026-08-25 so the journal and the DPS work are one app. It shares the SAME
         # CombatFeed the Combat tab uses, so the two can never disagree. Guarded like the
         # Combat tab: a fault here degrades one section, it does not stop the window.

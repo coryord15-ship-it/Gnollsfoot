@@ -8,14 +8,13 @@ officer see whether a quest's steps actually tick from real play, or are silentl
 using the identical engine a player runs.
 
 Kept deliberately NARROW — presentation + quest_matcher reads only:
-  - No devkit imports (quest_board, bank_harvest, command_center, officer_console).
+  - No imports from any external tooling.
   - No board-posting, no DB writes beyond what the caller does via matcher.mark_done/
     mark_undone.
   - The Officer Console layers board-posting and add-a-quest UI on top by passing an
     `extra_header` callback; this module must never grow that logic itself.
 
-Import direction: devkit -> app only (Officer Console imports this module). The app NEVER
-imports anything from devkit/GnollLoot-docs.
+Import direction is one-way INTO this app. This app imports nothing from outside itself.
 """
 from __future__ import annotations
 

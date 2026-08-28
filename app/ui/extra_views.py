@@ -1,17 +1,15 @@
-"""Devkit tabs ported into the shipped app: Healing, Loot, Gear, Codex, and the overlay.
+"""Combat-support tabs: Healing, Loot, Gear, Codex, and the always-on-top overlay.
 
 Owner, 2026-08-25: *"can you make a journal app plus that dps healing stuff we was working on
-into 1 app"* -- so the two builds become one. The app already had Journal and Combat; these
-are the four tabs plus the overlay that only existed in the devkit build.
+into 1 app"* -- one application, not two.
 
-WHAT CHANGED IN THE PORT, and why:
-  * The devkit owned a `Tail` THREAD that followed the log itself. The app already has exactly
-    one reader (`LogWatcher`), so every `app.tail` reference here now resolves to the shared
-    `CombatFeed` -- one reader, one parser, no disagreement between tabs.
+HOW IT IS FED:
+  * There is exactly ONE log reader in this app (`LogWatcher`), and every `app.tail` reference
+    here resolves to the shared `CombatFeed` riding it -- one reader, one parser, so no two
+    tabs can disagree about the same fight.
   * `load()` reads from %LOCALAPPDATA%/GnollGuard/data instead of the script folder. THIS REPO
     IS PUBLIC; the snapshots must not sit in the source tree. See `datapaths`.
-  * Colours and fonts are taken from `theme` where they line up, so the tabs match the rest of
-    the app rather than carrying the devkit's palette.
+  * Colours and fonts come from `theme`, so these tabs match the rest of the app.
 
 OFFLINE ONLY -- nothing in this module opens a socket. It reads the game's own log file and
 the local snapshots, and that is all.
@@ -33,7 +31,7 @@ from app.ui.combat_feed import clean_item as _feed_clean_item  # noqa: F401
 
 log = logging.getLogger(__name__)
 
-# Devkit palette names mapped onto the app theme so the ported bodies need no edits.
+# Short palette aliases mapped onto the app theme.
 BG, PANEL, HOVER, BORDER = theme.BG, theme.PANEL, theme.PANEL_HOVER, theme.PANEL_HOVER
 GOLD, T1, T2, T3 = theme.GOLD, theme.TEXT_PRIMARY, theme.TEXT_SECONDARY, theme.TEXT_MUTED
 OK, WARN, BAD = theme.GREEN, theme.GOLD, theme.DANGER
@@ -57,12 +55,7 @@ ERA_ALLOWS = {ERAS[0]: {"Classic"}, ERAS[1]: {"Classic", "Kunark"},
 ERA_COLOR = {"Classic": OK, "Kunark": WARN, "Velious": INFO, "": T3}
 KIND_COLOR = {"CLICK": INFO, "PROC": BAD, "FOCUS": OK, "FOCUS?": OK, "WORN": VIOLET}
 
-# The devkit reached sideways into these two trees. The app IS the app tree, and the devkit
-# is private and must never be a runtime dependency of a shipped build -- so APP_ROOT points
-# at ourselves and DEVTOOL is optional: if it is absent the affected helper degrades rather
-# than raising. Never make the shipped app require devtool/ to start.
 APP_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-DEVTOOL = os.environ.get("GNOLLGUARD_DEVTOOL", r"C:/Users/coryo/GnollLoot-docs/devtool")
 
 AC_TO_HP = 7.5   # owner's armour:HP exchange rate; same constant the site's BiS uses
 
@@ -921,13 +914,10 @@ def find_inventory():
     import glob
     cands = []
     try:
-        sys.path.insert(0, DEVTOOL)
-        from eq_logs import search_dirs
-        roots = set()
-        for d in search_dirs():
-            roots.add(d)
-            roots.add(os.path.dirname(d.rstrip("\\/")))
-        for d in roots:
+        # Discovery is self-contained in app.log_discovery: it reads only the game's own
+        # files and searches no path outside the EverQuest install and this app's folders.
+        from app.log_discovery import inventory_roots
+        for d in inventory_roots():
             cands += [p for p in glob.glob(os.path.join(d, "*.txt"))
                       if "inventory" in os.path.basename(p).lower()]
     except Exception:

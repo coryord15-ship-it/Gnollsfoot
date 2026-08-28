@@ -61,7 +61,7 @@ It is literally a list of real player names — uploading it would be the same
 leak wearing a different hat. It is held in memory, optionally cached to the
 local config dir, and is never serialised into any outbound payload.
 
-Spec: GnollLoot-docs/updates/2026-08-04-SPEC-player-vs-npc-identification.md
+Spec: the player-vs-NPC identification spec
 """
 from __future__ import annotations
 

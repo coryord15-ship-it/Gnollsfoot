@@ -276,6 +276,25 @@ class AuthManager:
             self._save_session(self._access_token, session.session.refresh_token, self._user)
         log.info("Session restored for: %s", self.username)
 
+        # 🔴 FOURTH FAULT ON THIS PATH, found 2026-08-27. Owner: *"why are my journal items
+        # showing while not logged into the discord? is it cached?"* — it was not cached and
+        # he was not logged out. The session restores fine, the Journal loads his real data,
+        # and the header still says "Login with Discord" forever.
+        #
+        # The login and logout paths both fire `_on_auth_change`; RESTORE never did. The
+        # window builds and calls `_refresh_auth_header()` BEFORE `restore_session()` runs
+        # (main.py builds the window ~320 lines earlier), so the header renders logged-out
+        # and nothing ever tells it otherwise.
+        #
+        # A UI that says "logged out" while showing logged-in data is worse than either
+        # state on its own: it invites the user to re-login, and it makes them distrust the
+        # data that is actually correct.
+        if self._on_auth_change:
+            try:
+                self._on_auth_change()
+            except Exception:
+                log.debug("auth-change callback failed after restore", exc_info=True)
+
 
 # ── Minimal callback HTTP server ──────────────────────────────────────────────
 

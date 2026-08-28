@@ -7,9 +7,10 @@ The live parser keeps `MAX_FIGHTS = 300` and trims the rest — deliberately, si
 for hours and must not grow without bound. Everything older is still on disk, so this
 re-reads it on demand into a SEPARATE parser that the live one never sees.
 
-🔴 LOG FILES ROTATE TO `.bak` IN ANOTHER FOLDER. A plain `eqlog_*.txt` glob sees 62 of
-2,151,301 lines — measured across 16 tools that all made the same mistake. Always go through
-`eq_logs.log_files()`, and treat the `.bak` files as the archive, never as junk.
+🔴 LOG FILES ROTATE TO `.bak`, AND NOT ALWAYS INTO THE SAME FOLDER. A plain `eqlog_*.txt`
+glob misses the overwhelming majority of a long-running player's history — measured at 62 of
+2,151,301 lines. Always go through `app.log_discovery`, and treat `.bak` files as the
+archive, never as junk.
 
 ⚠ Runs on a WORKER THREAD. Parsing a day out of 2.1M lines takes seconds, and doing it on
 the UI thread would freeze the window — which is the same class of problem as the refresh
@@ -24,20 +25,17 @@ import threading
 
 log = logging.getLogger(__name__)
 
-#: Where the devkit lives. Optional: the shipped app must never REQUIRE it to start.
-DEVTOOL = os.environ.get("GNOLLGUARD_DEVTOOL", r"C:/Users/coryo/GnollLoot-docs/devtool")
-
-
 def _log_files():
-    """Every log file including rotated archives, newest first. [] if unavailable."""
+    """Every log file including rotated archives, newest first.
+
+    `log_discovery` searches the EverQuest install and this app's archive folders, so this
+    works on any machine with no external tooling.
+    """
     try:
-        import sys
-        if DEVTOOL not in sys.path:
-            sys.path.insert(0, DEVTOOL)
-        from eq_logs import log_files
-        return list(log_files())
+        from app.log_discovery import log_files as _lf
+        return _lf()
     except Exception:
-        log.debug("eq_logs unavailable; falling back to the live log only", exc_info=True)
+        log.debug("log discovery failed", exc_info=True)
         return []
 
 

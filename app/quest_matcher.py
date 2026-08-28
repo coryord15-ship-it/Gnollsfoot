@@ -5,7 +5,7 @@ The Quest Journal's steps used to be raw text the player had to tick off by hand
 This module ticks them off itself, by watching the SAME parsed log events the app
 already produces (see log_watcher.py / quest_sightings.py) and matching them
 against each journaled quest's typed, structured `triggers`. See
-GnollLoot-docs/devtool/QUEST_STEPS_PLAN.md for the full design — the "FINAL
+the quest-steps design notes for the full design — the "FINAL
 revisions after Grok's sanity check" section is authoritative; this module
 implements it.
 

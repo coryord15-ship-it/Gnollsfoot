@@ -1,6 +1,6 @@
-"""Host for the ported devkit tabs, used by BOTH the Combat and Tools sections.
+"""Host for the combat-support tabs, used by BOTH the Combat and Tools sections.
 
-The ported builders in `extra_views` have the signature `tab_x(tab, app)` and reach into
+The tab builders in `extra_views` have the signature `tab_x(tab, app)` and reach into
 `app.tail`, `app.equipped`, `app.inventory_path` and `app.redraw_*`. Rather than bolt those
 onto the real application controller -- which owns the database, sync and updater and has no
 business growing UI state -- this frame IS the `app` they receive. The ported bodies stay
@@ -284,7 +284,7 @@ class PortedSection(ctk.CTkFrame):
                 if sig != self._last_sig:
                     self._last_sig = sig
                     # Repopulate, do NOT rebuild: the header and controls are unchanged, and
-                    # tearing the subtree down on a timer is what made the devkit window
+                    # tearing the subtree down on a timer is what made an earlier window
                     # impossible to drag.
                     self._refresh(name)
         except Exception:
@@ -339,7 +339,7 @@ class CombatSection(PortedSection):
 
     Replaces the plainer `CombatView`. Owner, 2026-08-22, about that earlier one: *"doesnt
     have a history but it shows like the last mob. kinda plain no real details to it."* The
-    devkit build answered that and the first merge pass regressed it by keeping the app's
+    earlier build answered that and the first merge pass regressed it by keeping the app's
     original tab; this restores the richer version.
     """
 

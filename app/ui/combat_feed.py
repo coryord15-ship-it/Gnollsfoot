@@ -1,15 +1,10 @@
 """One live-combat state object, shared by every tab that needs it.
 
 WHY THIS EXISTS
-    The devkit build (BETATESTING) grew its own `Tail` thread that followed the log and fed
-    `LiveCombat`. The shipped app already has exactly one log reader -- `LogWatcher` -- and
-    `CombatView` already rides it. Porting the devkit tabs across as-is would have given the
-    app TWO readers of the same file and TWO parsers that disagree.
-
-    So this is the devkit's `Tail` with the threading removed: same attribute surface
-    (`lc`, `loot`, `zone`, `live_seen`, `heal_zero`, `heal_any`) so the ported tabs work
-    unchanged, but lines are pushed IN from the existing watcher rather than pulled by a
-    thread of its own.
+    The app has exactly ONE log reader (`LogWatcher`). Every tab that needs combat state
+    reads THIS object, which the watcher pushes lines into. Giving each tab its own tailer
+    would mean several readers of one file and several parsers that disagree about the same
+    fight, so there is deliberately only one.
 
 OFFLINE ONLY. Owner, 2026-08-25: *"i dont want any of it public we are working soly offline
 mode."* Nothing here uploads, phones home, or reads anything but the game's own log file and

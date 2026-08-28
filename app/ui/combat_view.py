@@ -1,7 +1,7 @@
 """Combat tab — live DPS, the last kill, and who helped.
 
 Added 2026-08-22, completing the merge the owner asked for: the DPS parser lands in the
-app rather than staying a separate devkit tool. `app/parsers/combat_parser.py` arrived
+app rather than staying a separate tool. `app/parsers/combat_parser.py` arrived
 first and sat unused; this is what consumes it.
 
 HOW IT IS FED
@@ -130,7 +130,7 @@ class CombatView(ctk.CTkFrame):
     def _tick(self):
         """Redraw only when the data moved, and never while we are in the background.
 
-        🔴 Owner, 2026-08-23, about the devkit build carrying this same view: "the front
+        🔴 Owner, 2026-08-23, about an earlier build carrying this same view: "the front
         page of the app keeps refreshing so much i cant move the window or anything the
         only thing that should refresh that often is the layover live view."
 
