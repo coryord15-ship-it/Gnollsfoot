@@ -25,3 +25,4 @@ eqlwiki_dump.json
 tools/wikidata/
 # Local Supabase service-role key for the import script — NEVER commit
 tools/.supabase_service_key
+build_data/

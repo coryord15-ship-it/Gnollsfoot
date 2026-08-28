@@ -72,6 +72,14 @@ a = Analysis(
     datas=[
         ('assets', 'assets'),
         ('config/settings.json', 'config'),
+        # Reference snapshots for the Gear and Codex tabs. Sourced from build_data/, which
+        # is GITIGNORED -- this repo is public and the exports must never enter it. They are
+        # bundled so those two tabs work on a fresh install; without them a new user sees
+        # empty tabs and no explanation. datapaths prefers a user-updated copy in
+        # %LOCALAPPDATA% and falls back to this bundled one.
+        ('build_data/items.json', 'data'),
+        ('build_data/mobs.json', 'data'),
+        ('build_data/exaltations.json', 'data'),
     ] + _ctk_datas,
     hiddenimports=_ctk_hidden + [
         'customtkinter',

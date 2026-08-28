@@ -639,6 +639,14 @@ def tab_gear(tab, app):
     st.pack(fill="x", padx=12, pady=(10, 2))
     warn = wrap(head, "", WARN)
     warn.pack(fill="x", padx=12, pady=(0, 11))
+    wrap(head,
+         "HOW TO USE:  type  /outputfile inventory  in game, then reopen this tab. It reads "
+         "that dump and ranks your slots worst-first, so you fix real weak spots before "
+         "spending motes. Upgrade the slot first; tiering a bad item is wasted. "
+         "Only confirmed-Classic gear is suggested by default — unknown-era options are "
+         "listed separately and flagged, because a suggestion you cannot obtain is worse "
+         "than none.",
+         T3).pack(fill="x", padx=12, pady=(0, 11))
     body = ctk.CTkFrame(tab, fg_color="transparent")
     body.pack(fill="both", expand=True)
 
@@ -799,6 +807,18 @@ def tab_codex(tab, app):
     # 312 consumables. Defaults to donors only; the toggle shows the rest.
     state = {"kind": "ALL", "era": "Classic only", "mine": True, "q": "", "unk": True,
              "equip_only": True}
+    head = card(tab)
+    head.pack(fill="x", padx=10, pady=(10, 2))
+    lab(head, "EXALTATION CODEX", F_SMALL, GOLD).pack(fill="x", padx=12, pady=(10, 2))
+    wrap(head,
+         "HOW TO USE:  an exaltation is an augment you PULL OUT of gear you already own and "
+         "move onto something better. Level the donor item until extraction unlocks, and the "
+         "donor's class list must include a class you actually play or it will not transfer. "
+         "So an item is worth having to WEAR or to STRIP — this lists the strippable ones. "
+         "Filter by effect kind (click / proc / worn / focus), by era, and by your classes "
+         "using the selector at the top of this section.",
+         T3).pack(fill="x", padx=12, pady=(0, 11))
+
     ctrl = ctk.CTkFrame(tab, fg_color="transparent")
     ctrl.pack(fill="x", padx=10, pady=(10, 2))
 

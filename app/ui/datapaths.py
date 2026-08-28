@@ -17,6 +17,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import sys
 
 log = logging.getLogger(__name__)
 
@@ -28,8 +29,35 @@ DATA_DIR = os.path.join(
 _cache: dict[str, object] = {}
 
 
+def _bundled_dir() -> str:
+    """Where PyInstaller unpacked our bundled snapshots, or "" when running from source.
+
+    sys._MEIPASS is the temp folder a one-file build extracts into. It is READ-ONLY for our
+    purposes and is deleted on exit, so it is a fallback source only -- never a write target.
+    """
+    base = getattr(sys, "_MEIPASS", "")
+    if not base:
+        return ""
+    d = os.path.join(base, "data")
+    return d if os.path.isdir(d) else ""
+
+
 def path(name: str) -> str:
-    return os.path.join(DATA_DIR, name)
+    """Prefer a user-updated snapshot; fall back to the one bundled in the build.
+
+    A user who refreshes their data drops newer files in %LOCALAPPDATA% and those win. A
+    fresh install has none, so the bundled copy keeps Gear and Codex working out of the box
+    instead of showing two empty tabs with no explanation.
+    """
+    local = os.path.join(DATA_DIR, name)
+    if os.path.exists(local):
+        return local
+    bundled = _bundled_dir()
+    if bundled:
+        cand = os.path.join(bundled, name)
+        if os.path.exists(cand):
+            return cand
+    return local
 
 
 def available(name: str) -> bool:
