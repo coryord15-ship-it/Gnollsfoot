@@ -65,6 +65,30 @@ print(f"[spec] embedding version resource {_VERSION} {_VTUPLE}")
 # pygame was only used for broken alert sounds — no longer shipped.
 _ctk_datas, _ctk_bins, _ctk_hidden = collect_all('customtkinter')
 
+def _ctk_snapshots():
+    """Reference snapshots for the Gear and Codex tabs, bundled ONLY if present.
+
+    🔴 THEY ARE GITIGNORED ON PURPOSE. This repo is public and the database exports must
+    never enter it. But CI builds from the repo, so a hard `('build_data/items.json', ...)`
+    entry fails the tagged build outright:
+
+        ERROR: Unable to find 'D:\a\Gnollsfoot\Gnollsfoot\build_data\items.json'
+
+    Bundling a gitignored file works on the maintainer's machine and can NEVER work in CI.
+    So this is opportunistic: a local build that has build_data/ ships the snapshots, and a
+    CI build without them still produces a working exe. `datapaths` already prefers a
+    user-updated copy in %LOCALAPPDATA% and degrades to a clear on-screen notice, so the
+    difference is which tabs have data -- never whether the app runs.
+    """
+    out = []
+    for name in ("items.json", "mobs.json", "exaltations.json"):
+        p = os.path.join("build_data", name)
+        if os.path.exists(p):
+            out.append((p, "data"))
+    print("[spec] bundling %d/3 reference snapshots" % len(out))
+    return out
+
+
 a = Analysis(
     ['app/main.py'],
     pathex=['.'],
@@ -72,15 +96,7 @@ a = Analysis(
     datas=[
         ('assets', 'assets'),
         ('config/settings.json', 'config'),
-        # Reference snapshots for the Gear and Codex tabs. Sourced from build_data/, which
-        # is GITIGNORED -- this repo is public and the exports must never enter it. They are
-        # bundled so those two tabs work on a fresh install; without them a new user sees
-        # empty tabs and no explanation. datapaths prefers a user-updated copy in
-        # %LOCALAPPDATA% and falls back to this bundled one.
-        ('build_data/items.json', 'data'),
-        ('build_data/mobs.json', 'data'),
-        ('build_data/exaltations.json', 'data'),
-    ] + _ctk_datas,
+    ] + _ctk_snapshots() + _ctk_datas,
     hiddenimports=_ctk_hidden + [
         'customtkinter',
         'pystray',
