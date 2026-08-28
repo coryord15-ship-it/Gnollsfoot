@@ -243,8 +243,20 @@ RX_PET = re.compile(r"^(?P<owner>.+?)[`'](?:s)? pet$", re.I)
 # ⚠ Damage a charmed pet deals belongs to the CHARMER, the way a summoned pet's does.
 # Counting it as a separate "player" inflates the raid list with mob names; dropping it
 # entirely under-reports an enchanter by most of their contribution.
+# ⚠ BARD CHARM SONGS CARRY NO CHARM WORD. The keyword list below catches every caster charm
+# (Allure / Charm / Beguile / Dominate ...), but a bard's are named after bards: "Solon's
+# Bewitching Bravura", "Solon's Song of the Sirens", "Largo's Melodic Binding". Measured in
+# our own logs: Imperia singing Bewitching Bravura appears 135 times, and every pet charmed
+# that way was being credited to the ENEMY side of the fight.
+#
+# Named explicitly because no rule derives them from the text -- a new bard charm has to be
+# added here by name. Kept as whole phrases so "binding" or "song" alone cannot match a
+# healing song or a snare.
+BARD_CHARM_SONGS = ("bewitching bravura", "song of the sirens", "melodic binding")
+
 CHARM_SPELLS = re.compile(
-    r"\b(charm|beguile|allure|dominate|enslave|cajole|befriend|dictate)\b", re.I)
+    r"\b(charm|beguile|allure|dominate|enslave|cajole|befriend|dictate)\b"
+    + "".join("|" + re.escape(x) for x in BARD_CHARM_SONGS), re.I)
 # 🔴 THE REAL LINE IS "has been charmed", NOT "is charmed". Confirmed against the owner's
 # own Plane of Sky session 2026-08-16: `a crystaline cloud has been charmed.` The original
 # pattern matched neither that nor anything else in 664 charm-related lines, so every
