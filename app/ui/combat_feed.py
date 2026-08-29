@@ -212,9 +212,17 @@ class CombatFeed:
                 item, mob = clean_item(l.group("item")), l.group("mob")
                 # 'when' is what the Loot tab groups by; it must be the log's own time,
                 # not now. 'stamp' is kept raw for anything that wants the original text.
+                is_new = self._is_new(item, mob)
                 self.loot.insert(0, {"item": item, "mob": mob, "stamp": stamp,
                                      "when": log_dt(stamp),
-                                     "new": self._is_new(item, mob)})
+                                     "new": is_new})
+                # Report combinations the database has never recorded. Guarded on `live` so
+                # startup priming does not re-file the whole back catalogue every launch.
+                try:
+                    from app.ui import drop_report
+                    drop_report.note(item, mob, self.zone, is_new, live)
+                except Exception:
+                    log.debug("drop note failed", exc_info=True)
                 del self.loot[80:]
         except Exception:
             log.exception("combat feed line")

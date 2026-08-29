@@ -1965,6 +1965,15 @@ def main():
     except Exception:
         log.debug("farm share timer not armed", exc_info=True)
 
+    # Drop reports: submit_drop_report had NO caller, so the app watched the player loot
+    # things, knew which combinations were new, and reported none of them. Every row in
+    # drop_reports came from the website form instead of from anyone playing.
+    try:
+        from app.ui import drop_report
+        drop_report.start_timer(win)
+    except Exception:
+        log.debug("drop report timer not armed", exc_info=True)
+
     log.info("GnollGuard started")
     win.mainloop()
 
