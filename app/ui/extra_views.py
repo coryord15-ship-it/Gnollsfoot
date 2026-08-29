@@ -1219,12 +1219,7 @@ def tab_combat(tab, app):
                     lab(cell, k.upper(), F_SMALL, T3).pack(anchor="w")
                 for cnum in range(3):
                     grid.grid_columnconfigure(cnum, weight=1, uniform="d")
-                if r.get("verbs"):
-                    lab(c, "attacks:  " + ",  ".join(f"{v} x{n}" for v, n in r["verbs"][:6]),
-                        F_SMALL, T2).pack(fill="x", padx=11, pady=(0, 3))
-                if r.get("spells"):
-                    lab(c, "spells:   " + ",  ".join(f"{v} x{n}" for v, n in r["spells"][:6]),
-                        F_SMALL, T2).pack(fill="x", padx=11, pady=(0, 9))
+                ability_breakdown(c, r)
 
         # ── browsable history ────────────────────────────────────────────────
         section(body, f"history — {len(fights)} fights, click to pin one")
@@ -1370,3 +1365,72 @@ def tab_farm(tab, app):
 
     app.redraw_farm = redraw
     redraw()
+
+
+# ══════════════════════════════════════════════════════════════════════════════════════════
+# ABILITY BREAKDOWN
+# ══════════════════════════════════════════════════════════════════════════════════════════
+
+#: Proc rows get their own colour. A proc is gear firing on its own; a melee swing is the
+#: player pressing something. Reading "which of my damage did I actually cause" is the whole
+#: point of the panel, and one colour for both hides it.
+COL_PROC = "#9B8BD6"
+COL_MELEE = GOLD
+COL_SPELL = "#6FA8DC"
+
+
+def _ability_colour(kind: str) -> str:
+    return {"proc": COL_PROC, "spell": COL_SPELL}.get(kind, COL_MELEE)
+
+
+def ability_breakdown(parent, row: dict) -> None:
+    """One bar per ability, biggest first: name, observed range, dps and total.
+
+    🔴 BARS ARE SCALED TO THE BIGGEST ABILITY, not to the actor's total. Scaling to the total
+    makes every bar a stub and the comparison — which is the only reason to draw bars —
+    impossible to read. The number beside it carries the absolute value.
+
+    Replaces two comma-separated lists ("attacks: slash x15, punch x16") that made the reader
+    do the ranking by eye and showed no damage at all, only counts.
+    """
+    abilities = row.get("abilities") or []
+    if not abilities:
+        return
+
+    total = sum(a["damage"] for a in abilities) or 1
+    peak = max(a["damage"] for a in abilities) or 1
+
+    wrapb = ctk.CTkFrame(parent, fg_color="transparent")
+    wrapb.pack(fill="x", padx=11, pady=(2, 9))
+
+    for a in abilities[:10]:
+        col = _ability_colour(a["kind"])
+        rowf = ctk.CTkFrame(wrapb, fg_color="transparent")
+        rowf.pack(fill="x", pady=1)
+
+        top = ctk.CTkFrame(rowf, fg_color="transparent")
+        top.pack(fill="x")
+
+        left = ctk.CTkFrame(top, fg_color="transparent")
+        left.pack(side="left")
+        lab(left, a["name"][:22], F_SMALL, col).pack(side="left")
+        # The RANGE is what separates "many small hits" from "one lucky crit", and a total
+        # alone cannot say which. Shown only when it is actually a range.
+        lo, hi = a.get("lo"), a.get("hi")
+        if lo is not None and hi is not None:
+            rng = f"{lo}" if lo == hi else f"{lo} - {hi}"
+            lab(left, "  " + rng, F_SMALL, T3).pack(side="left")
+        if a["kind"] == "proc" and a.get("ppm"):
+            # Say it is per-fight: a proc rate off a 35-second fight is not the item's ppm.
+            lab(left, f"  proc · {a['ppm']:.1f}/min this fight", F_SMALL, COL_PROC).pack(side="left")
+
+        right = ctk.CTkFrame(top, fg_color="transparent")
+        right.pack(side="right")
+        lab(right, f"{a['damage']:,}", F_MONO, T1).pack(side="right")
+        lab(right, f"{round(a['dps']):,} dps · {100 * a['damage'] / total:.0f}%   ",
+            F_SMALL, T3).pack(side="right")
+
+        bar(rowf, a["damage"] / peak, col, height=7)
+
+    if len(abilities) > 10:
+        lab(wrapb, f"+{len(abilities) - 10} more", F_SMALL, T3).pack(anchor="w", pady=(4, 0))

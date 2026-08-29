@@ -384,6 +384,11 @@ class Actor:
     # already read as plain counts).
     verb_dmg: collections.Counter = field(default_factory=collections.Counter)
     spell_dmg: collections.Counter = field(default_factory=collections.Counter)
+    #: Smallest and largest single hit per ability. A total tells you what an ability
+    #: contributed; the RANGE tells you whether that came from many small hits or a few big
+    #: ones, which is the difference between "my proc is carrying me" and "I got lucky once".
+    ability_lo: dict = field(default_factory=dict)
+    ability_hi: dict = field(default_factory=dict)
     mods: collections.Counter = field(default_factory=collections.Counter)
 
     @property
@@ -409,6 +414,55 @@ class Actor:
     @property
     def overheal(self) -> int:
         return max(0, self.heal_attempted - self.heal_effective)
+
+
+def _abilities(a, dur: float) -> list:
+    """Per-ability rows: name, hits, total damage, dps, observed range, and proc marking.
+
+    🔴 A damaging spell with ZERO "You begin casting" lines came off an ITEM, not off a cast
+    bar. That is how Smiting Strike was found doing 136,850 damage across 905 hits with no
+    casts at all. Procs are marked so a reader can tell gear from buttons.
+
+    ⚠ `ppm` is per minute OF THIS FIGHT, which is the only rate a fight-scoped panel can
+    honestly state -- a proc rate over a 35-second fight is not the item's true ppm, and the
+    UI must say which it is showing.
+    """
+    if not a:
+        return []
+    mins = max(dur, 1.0) / 60.0
+    out = []
+    for hits_ctr, dmg_ctr, kind in ((a.verbs, a.verb_dmg, "melee"),
+                                    (a.spells, a.spell_dmg, "spell")):
+        for name, hits in hits_ctr.items():
+            dmg = dmg_ctr.get(name, 0)
+            if not dmg:
+                continue
+            is_proc = (kind == "spell" and name not in getattr(a, "cast_spells", set()))
+            out.append({
+                "name": name,
+                "hits": hits,
+                "damage": dmg,
+                "dps": dmg / max(dur, 1.0),
+                "lo": a.ability_lo.get(name),
+                "hi": a.ability_hi.get(name),
+                "kind": "proc" if is_proc else kind,
+                "ppm": (hits / mins) if is_proc else None,
+            })
+    out.sort(key=lambda r: -r["damage"])
+    return out
+
+
+def _track_range(a, key: str, dmg: int) -> None:
+    """Widen the observed min/max for one ability. Zero-damage lines are skipped -- a miss or
+    a fully absorbed hit is not a 0-damage hit, and letting one in would report every ability
+    as starting at 0."""
+    if dmg <= 0:
+        return
+    lo = a.ability_lo.get(key)
+    if lo is None or dmg < lo:
+        a.ability_lo[key] = dmg
+    if dmg > a.ability_hi.get(key, 0):
+        a.ability_hi[key] = dmg
 
 
 @dataclass
@@ -675,9 +729,11 @@ class LogParser:
         if verb:
             a.verbs[verb] += 1
             a.verb_dmg[verb] += dmg
+            _track_range(a, verb, dmg)
         if spell:
             a.spells[spell] += 1
             a.spell_dmg[spell] += dmg
+            _track_range(a, spell, dmg)
         if mods:
             if MOD_CRIT.search(mods):
                 a.crits += 1
@@ -1268,6 +1324,12 @@ class LiveCombat(LogParser):
                 "verbs": a.verbs.most_common(6) if a else [],
                 "spells": a.spells.most_common(6) if a else [],
                 "mods": a.mods.most_common(4) if a else [],
+                # One row PER ABILITY, biggest contributor first -- what a drill-down
+                # actually wants. Verbs and spells are merged because the player does not
+                # think in those categories: Bash and Smiting Strike are both just "things
+                # that did damage", and splitting them across two lists made the reader do
+                # the merging by eye.
+                "abilities": _abilities(a, f.duration),
             })
         rows.sort(key=lambda r: -r["damage"])
         return rows
