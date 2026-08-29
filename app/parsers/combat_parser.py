@@ -387,6 +387,12 @@ class Actor:
     #: Smallest and largest single hit per ability. A total tells you what an ability
     #: contributed; the RANGE tells you whether that came from many small hits or a few big
     #: ones, which is the difference between "my proc is carrying me" and "I got lucky once".
+    #: Spell names that arrived on a DAMAGE SHIELD line. A shield is not a proc: it fires
+    #: when something hits YOU, not when you swing, so it cannot be given a per-swing rate and
+    #: should not sit under the same label as a weapon proc. The client agrees -- eqstr_us
+    #: has its own filter categories for it, 6273 "Damage Shields (You Attacking)" and 9222
+    #: "Damage Shields (You Defending)".
+    shield_spells: set = field(default_factory=set)
     ability_lo: dict = field(default_factory=dict)
     ability_hi: dict = field(default_factory=dict)
     mods: collections.Counter = field(default_factory=collections.Counter)
@@ -437,7 +443,9 @@ def _abilities(a, dur: float) -> list:
             dmg = dmg_ctr.get(name, 0)
             if not dmg:
                 continue
-            is_proc = (kind == "spell" and name not in getattr(a, "cast_spells", set()))
+            is_shield = name in getattr(a, "shield_spells", set())
+            is_proc = (kind == "spell" and not is_shield
+                       and name not in getattr(a, "cast_spells", set()))
             out.append({
                 "name": name,
                 "hits": hits,
@@ -445,7 +453,10 @@ def _abilities(a, dur: float) -> list:
                 "dps": dmg / max(dur, 1.0),
                 "lo": a.ability_lo.get(name),
                 "hi": a.ability_hi.get(name),
-                "kind": "proc" if is_proc else kind,
+                "kind": "shield" if is_shield else ("proc" if is_proc else kind),
+                # 🔴 NO ppm FOR A SHIELD. A proc rate is per swing YOU make; a shield fires
+                # when something hits YOU, so the same number would mean a different thing
+                # and reward standing in front of more mobs.
                 "ppm": (hits / mins) if is_proc else None,
             })
     out.sort(key=lambda r: -r["damage"])
@@ -869,9 +880,11 @@ class LogParser:
             # added once), but any per-ability view listed the identical 312 twice and
             # inflated the breakdown. "thorns" is the ability; "pierced" is just how the
             # sentence reads.
+            _noun = (m.group("noun") or "").strip()
             self._hit(ts, f, src, m.group("dst"), int(m.group("dmg")),
-                      "dmg_shield",
-                      spell=(m.group("noun") or "").strip())
+                      "dmg_shield", spell=_noun)
+            if _noun:
+                f.actor(src).shield_spells.add(_noun)
             return
 
         m = RX_MISS.match(body)

@@ -274,6 +274,12 @@ class Overlay(ctk.CTkToplevel):
         #: Last rendered state. Ticks whose signature matches do no work at all, which out
         #: of combat is very nearly all of them.
         self._sig = None
+        #: Which actor the overlay is drilled into, or None for the combatant list. Clicking
+        #: a name swaps the SAME panel rather than opening a window: the overlay must never
+        #: steal focus or pop anything up, so a second window is not an option.
+        self._drill = None
+        self._detail = []          # separate pool; detail rows outlive a redraw like the rest
+        self._back = None
         self.refresh()
 
     def _row_widget(self, i):
@@ -304,6 +310,32 @@ class Overlay(ctk.CTkToplevel):
                                "fill": fill, "pets": pets})
         return self._pool[i]
 
+    def _detail_widget(self, i):
+        """Build detail row `i` once, reuse forever -- same discipline as the main pool."""
+        while len(self._detail) <= i:
+            c = ctk.CTkFrame(self.rows, fg_color="transparent")
+            line = ctk.CTkFrame(c, fg_color="transparent")
+            line.pack(fill="x")
+            nm = lab(line, "", F_SMALL, T1)
+            nm.pack(side="left")
+            rng = lab(line, "", F_SMALL, T3)
+            rng.pack(side="left")
+            val = lab(line, "", F_SMALL, T3)
+            val.pack(side="right")
+            track = ctk.CTkFrame(c, fg_color=PANEL, corner_radius=3, height=6)
+            track.pack(fill="x", pady=(3, 0))
+            track.pack_propagate(False)
+            fill = ctk.CTkFrame(track, fg_color=GOLD, corner_radius=3)
+            fill.place(relx=0, rely=0, relwidth=0.01, relheight=1)
+            self._detail.append({"box": c, "name": nm, "rng": rng, "val": val, "fill": fill})
+        return self._detail[i]
+
+    def _open_drill(self, who):
+        """Enter/leave the per-ability view. Invalidates the signature so the next tick draws."""
+        self._drill = who
+        self._sig = None
+        self.refresh()
+
     def _grab(self, e):
         self._off = (e.x_root - self.winfo_x(), e.y_root - self.winfo_y())
 
@@ -321,7 +353,7 @@ class Overlay(ctk.CTkToplevel):
             # if it matches, no pixel could differ.
             sig = None
             if f:
-                sig = (f["mob"], round(f.get("duration") or 0, 1), f.get("total"),
+                sig = (self._drill, f["mob"], round(f.get("duration") or 0, 1), f.get("total"),
                        livegate and bool(lc.current()),
                        tuple((r["name"], r.get("own_damage", r["damage"]),
                               tuple((p["name"], p["damage"]) for p in (r.get("pets") or [])[:2]))
@@ -352,6 +384,42 @@ class Overlay(ctk.CTkToplevel):
                 self.lbl_dps.configure(
                     text="  your dps (you + pet)" if (me or {}).get("pet_damage")
                     else "  your dps")
+                # ── drilled into one actor: abilities instead of combatants ──────────
+                if self._drill:
+                    who = next((r for r in f["rows"] if r["name"] == self._drill), None)
+                    abil = (who or {}).get("abilities") or []
+                    if self._back is None:
+                        self._back = lab(self.rows, "", F_SMALL, GOLD)
+                        # Same reason as the name labels: a real button would take focus.
+                        self._back.bind("<Button-1>", lambda _e: self._open_drill(None))
+                    self._back.configure(text="‹ back to everyone")
+                    self._back.pack(fill="x", pady=(0, 3))
+                    for w in self._pool:
+                        w["box"].pack_forget()
+                    dpeak = max((x["damage"] for x in abil), default=1) or 1
+                    for i, ab in enumerate(abil[:7]):
+                        d = self._detail_widget(i)
+                        col = _ability_colour(ab["kind"])
+                        d["name"].configure(text=ab["name"][:18], text_color=col)
+                        lo, hi = ab.get("lo"), ab.get("hi")
+                        rng = "" if lo is None else ("  %d" % lo if lo == hi else "  %d-%d" % (lo, hi))
+                        _mark = {"proc": "  proc", "shield": "  DS"}.get(ab["kind"], "")
+                        d["rng"].configure(text=rng + _mark)
+                        d["val"].configure(text="%d dps · %s" % (round(ab["dps"]),
+                                                                      _short(ab["damage"])))
+                        d["fill"].configure(fg_color=col)
+                        d["fill"].place_configure(relwidth=max(0.01, min(1.0, ab["damage"] / dpeak)))
+                        d["box"].pack(fill="x", pady=1)
+                    for i in range(len(abil[:7]), len(self._detail)):
+                        self._detail[i]["box"].pack_forget()
+                    self.after(OVERLAY_MS, self.refresh)
+                    return
+
+                if self._back is not None:
+                    self._back.pack_forget()
+                for d in self._detail:
+                    d["box"].pack_forget()
+
                 peak = max((r["damage"] for r in f["rows"]), default=1) or 1
                 shown = f["rows"][:6]
                 for i, r in enumerate(shown):
@@ -359,6 +427,10 @@ class Overlay(ctk.CTkToplevel):
                     w["box"].pack(fill="x", pady=1)
                     col = GOLD if r["is_me"] else T1
                     w["name"].configure(text=r["name"][:20], text_color=col)
+                    # Click a name to drill into that actor's abilities. bind() rather than a
+                    # button: a CTkButton here would take focus, and the overlay must never.
+                    w["name"].bind("<Button-1>",
+                                   lambda _e, who=r["name"]: self._open_drill(who))
                     # OWN dps here, not the pet-inclusive total: the pet is listed directly
                     # below, so showing the combined figure counted it twice on screen.
                     _own = r.get("own_damage", r["damage"])
@@ -1375,12 +1447,23 @@ def tab_farm(tab, app):
 #: player pressing something. Reading "which of my damage did I actually cause" is the whole
 #: point of the panel, and one colour for both hides it.
 COL_PROC = "#9B8BD6"
+#: Damage shields get their own colour and never say "proc". The client itself treats them as
+#: a separate category (eqstr_us 6273 "Damage Shields (You Attacking)"), and they behave
+#: differently: a shield fires when something hits YOU, so it scales with how many things are
+#: on you rather than with how fast you swing.
+COL_SHIELD = "#5FB49C"
 COL_MELEE = GOLD
 COL_SPELL = "#6FA8DC"
 
 
+def _short(n: int) -> str:
+    """1,338 -> 1.3k. The overlay is 360px wide; a full number pushes the bar off the edge."""
+    return ("%.1fk" % (n / 1000.0)) if n >= 1000 else str(n)
+
+
 def _ability_colour(kind: str) -> str:
-    return {"proc": COL_PROC, "spell": COL_SPELL}.get(kind, COL_MELEE)
+    return {"proc": COL_PROC, "spell": COL_SPELL,
+            "shield": COL_SHIELD}.get(kind, COL_MELEE)
 
 
 def ability_breakdown(parent, row: dict) -> None:
@@ -1423,6 +1506,10 @@ def ability_breakdown(parent, row: dict) -> None:
         if a["kind"] == "proc" and a.get("ppm"):
             # Say it is per-fight: a proc rate off a 35-second fight is not the item's ppm.
             lab(left, f"  proc · {a['ppm']:.1f}/min this fight", F_SMALL, COL_PROC).pack(side="left")
+        elif a["kind"] == "shield":
+            # No rate: a shield fires on THEIR swings, not yours, so a per-minute figure
+            # would measure how many mobs were beating on you.
+            lab(left, "  damage shield", F_SMALL, COL_SHIELD).pack(side="left")
 
         right = ctk.CTkFrame(top, fg_color="transparent")
         right.pack(side="right")
