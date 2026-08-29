@@ -266,6 +266,22 @@ class Overlay(ctk.CTkToplevel):
             w.bind("<Button-1>", self._grab)
             w.bind("<B1-Motion>", self._drag)
         self._off = (0, 0)
+
+        # 🔴 overrideredirect(True) removes the window frame, and with it every native resize
+        # handle. That was fine at 6 combatant rows and is not fine now the drill-down has a
+        # dozen abilities to show. This is a manual grip in the bottom-right corner.
+        # ⚠ Resize only. It must never call focus_force or lift on drag: the overlay's
+        # standing invariant is that it never steals focus while the game has it.
+        grip = ctk.CTkFrame(self, fg_color=BORDER, width=16, height=16, corner_radius=0)
+        grip.place(relx=1.0, rely=1.0, anchor="se")
+        for _g in (grip,) + tuple(grip.winfo_children()):
+            try:
+                _g.configure(cursor="size_nw_se")
+            except Exception:
+                pass
+        grip.bind("<Button-1>", self._grip_start)
+        grip.bind("<B1-Motion>", self._grip_drag)
+        self._grip0 = (0, 0, 0, 0)
         # 🔴 Widget POOL, not destroy-and-recreate. The old refresh cleared this frame and
         # rebuilt ~30 widgets EVERY SECOND, whether or not anything had changed -- measured
         # at 34.4 ms per idle tick, 3,600 times an hour, forever. Tk widget churn is the
@@ -336,6 +352,19 @@ class Overlay(ctk.CTkToplevel):
         self._sig = None
         self.refresh()
 
+    def _grip_start(self, e):
+        self._grip0 = (e.x_root, e.y_root, self.winfo_width(), self.winfo_height())
+
+    def _grip_drag(self, e):
+        x0, y0, w0, h0 = self._grip0
+        # Floors, not just minimums for tidiness: below roughly this the header and the dps
+        # figure overlap and the window becomes unreadable rather than merely small.
+        w = max(280, w0 + (e.x_root - x0))
+        h = max(220, h0 + (e.y_root - y0))
+        self.geometry("%dx%d+%d+%d" % (w, h, self.winfo_x(), self.winfo_y()))
+        # More height means more rows are worth drawing; invalidate so the next tick redraws.
+        self._sig = None
+
     def _grab(self, e):
         self._off = (e.x_root - self.winfo_x(), e.y_root - self.winfo_y())
 
@@ -392,12 +421,16 @@ class Overlay(ctk.CTkToplevel):
                         self._back = lab(self.rows, "", F_SMALL, GOLD)
                         # Same reason as the name labels: a real button would take focus.
                         bind_click(self._back, lambda _e: self._open_drill(None))
-                    self._back.configure(text="‹ back to everyone")
+                    self._back.configure(text="‹  back to everyone")
                     self._back.pack(fill="x", pady=(0, 3))
                     for w in self._pool:
                         w["box"].pack_forget()
                     dpeak = max((x["damage"] for x in abil), default=1) or 1
-                    for i, ab in enumerate(abil[:7]):
+                    # Rows to draw scale with the window now that it can be resized -- a
+                    # fixed 7 wasted a tall window and overflowed a short one. ~26px per row
+                    # after the header block, measured against the default 360x430.
+                    _fit = max(4, min(len(abil), int((self.winfo_height() - 190) / 26)))
+                    for i, ab in enumerate(abil[:_fit]):
                         d = self._detail_widget(i)
                         col = _ability_colour(ab["kind"])
                         d["name"].configure(text=ab["name"][:18], text_color=col)
@@ -410,7 +443,7 @@ class Overlay(ctk.CTkToplevel):
                         d["fill"].configure(fg_color=col)
                         d["fill"].place_configure(relwidth=max(0.01, min(1.0, ab["damage"] / dpeak)))
                         d["box"].pack(fill="x", pady=1)
-                    for i in range(len(abil[:7]), len(self._detail)):
+                    for i in range(len(abil[:_fit]), len(self._detail)):
                         self._detail[i]["box"].pack_forget()
                     self.after(OVERLAY_MS, self.refresh)
                     return
@@ -426,11 +459,17 @@ class Overlay(ctk.CTkToplevel):
                     w = self._row_widget(i)
                     w["box"].pack(fill="x", pady=1)
                     col = GOLD if r["is_me"] else T1
-                    w["name"].configure(text=r["name"][:20], text_color=col)
-                    # Click a name to drill into that actor's abilities. bind() rather than a
-                    # button: a CTkButton here would take focus, and the overlay must never.
-                    bind_click(w["name"],
-                               lambda _e, who=r["name"]: self._open_drill(who))
+                    # ⚠ AN AFFORDANCE, NOT JUST A BINDING. The drill-down worked and the
+                    # owner could not find it: a bare name does not look clickable. The
+                    # chevron says "there is more behind this".
+                    w["name"].configure(text="› " + r["name"][:18], text_color=col)
+                    # Bind the whole ROW, not only the label -- a 360px row is a big target
+                    # and hunting for the exact text is not something to ask of someone
+                    # mid-fight. bind() rather than a button: a CTkButton takes focus, and
+                    # the overlay must never.
+                    _click = (lambda _e, who=r["name"]: self._open_drill(who))
+                    for _w in (w["box"], w["name"], w["dps"]):
+                        bind_click(_w, _click)
                     # OWN dps here, not the pet-inclusive total: the pet is listed directly
                     # below, so showing the combined figure counted it twice on screen.
                     _own = r.get("own_damage", r["damage"])
