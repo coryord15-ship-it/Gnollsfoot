@@ -863,8 +863,14 @@ class LogParser:
             src = "You" if m.group("mine") else (m.group("src") or UNATTRIBUTED)
             self.combat_lines += 1
             f = self._touch(ts, m.group("dst"), src)
+            # 🔴 NOUN ONLY, NOT THE VERB. A shield line names the effect twice -- "pierced BY
+            # YOUR thorns" -- and passing both wrote verb_dmg['pierced'] AND
+            # spell_dmg['thorns'] with the SAME damage. Fight totals were right (damage is
+            # added once), but any per-ability view listed the identical 312 twice and
+            # inflated the breakdown. "thorns" is the ability; "pierced" is just how the
+            # sentence reads.
             self._hit(ts, f, src, m.group("dst"), int(m.group("dmg")),
-                      "dmg_shield", verb=m.group("verb"),
+                      "dmg_shield",
                       spell=(m.group("noun") or "").strip())
             return
 
