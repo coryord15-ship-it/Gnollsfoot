@@ -391,7 +391,7 @@ class Overlay(ctk.CTkToplevel):
                     if self._back is None:
                         self._back = lab(self.rows, "", F_SMALL, GOLD)
                         # Same reason as the name labels: a real button would take focus.
-                        self._back.bind("<Button-1>", lambda _e: self._open_drill(None))
+                        bind_click(self._back, lambda _e: self._open_drill(None))
                     self._back.configure(text="‹ back to everyone")
                     self._back.pack(fill="x", pady=(0, 3))
                     for w in self._pool:
@@ -429,8 +429,8 @@ class Overlay(ctk.CTkToplevel):
                     w["name"].configure(text=r["name"][:20], text_color=col)
                     # Click a name to drill into that actor's abilities. bind() rather than a
                     # button: a CTkButton here would take focus, and the overlay must never.
-                    w["name"].bind("<Button-1>",
-                                   lambda _e, who=r["name"]: self._open_drill(who))
+                    bind_click(w["name"],
+                               lambda _e, who=r["name"]: self._open_drill(who))
                     # OWN dps here, not the pet-inclusive total: the pet is listed directly
                     # below, so showing the combined figure counted it twice on screen.
                     _own = r.get("own_damage", r["damage"])
@@ -1454,6 +1454,32 @@ COL_PROC = "#9B8BD6"
 COL_SHIELD = "#5FB49C"
 COL_MELEE = GOLD
 COL_SPELL = "#6FA8DC"
+
+
+def bind_click(widget, fn) -> None:
+    """Make a CTk widget actually clickable.
+
+    🔴 `CTkLabel.bind()` DOES NOT WORK for this. A CTkLabel is a composite -- a CTkCanvas plus
+    a real tk Label -- and the mouse hits the CHILDREN, not the wrapper. Binding the wrapper
+    silently registers nothing (`lab.bind("<Button-1>")` returns empty) and the click is
+    swallowed. The overlay drill-down shipped in 1.5.26 broken for exactly this reason: the
+    test called the handler directly and proved the VIEW worked while never proving the CLICK
+    did. Bind the wrapper AND every child.
+    """
+    for w in (widget, getattr(widget, "_label", None), getattr(widget, "_canvas", None)):
+        if w is None:
+            continue
+        try:
+            w.bind("<Button-1>", fn)
+            w.configure(cursor="hand2")
+        except Exception:
+            pass
+    for child in getattr(widget, "winfo_children", lambda: [])():
+        try:
+            child.bind("<Button-1>", fn)
+            child.configure(cursor="hand2")
+        except Exception:
+            pass
 
 
 def _short(n: int) -> str:
