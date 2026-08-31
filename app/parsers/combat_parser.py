@@ -1348,8 +1348,25 @@ class LiveCombat(LogParser):
                 # think in those categories: Bash and Smiting Strike are both just "things
                 # that did damage", and splitting them across two lists made the reader do
                 # the merging by eye.
-                "abilities": _abilities(a, f.duration),
+                # 🔴 PETS ARE PART OF THIS ROW'S DAMAGE, SO THEY BELONG IN ITS BREAKDOWN.
+                # The header says "your dps (you + pet)" and reads `damage`, but _abilities()
+                # only walks the actor's OWN verbs and spells. On a charm fight that is not a
+                # rounding difference: measured on Bzzzt, the bars summed to 9,422 of 26,501
+                # and the missing 17,079 was the pet -- 64% of the fight, invisible.
+                # Same class of error as the damage-shield double count, running the other
+                # way: a breakdown that does not add up to its own headline.
+                "abilities": _abilities(a, f.duration) + [
+                    {"name": pn, "hits": pa.hits, "damage": pa.damage,
+                     "dps": pa.damage / max(f.duration, 1.0),
+                     "lo": None, "hi": None, "kind": "pet", "ppm": None}
+                    for pn, pa in sorted(plist, key=lambda x: -x[1].damage) if pa.damage
+                ],
+                # re-ranked below so a big pet does not sit under a small swing
             })
+        for r in rows:
+            # The merged ability+pet list must be ranked as ONE list; concatenating a sorted
+            # pet list onto a sorted ability list leaves a 17k pet below a 200-damage kick.
+            r["abilities"].sort(key=lambda a: -a["damage"])
         rows.sort(key=lambda r: -r["damage"])
         return rows
 

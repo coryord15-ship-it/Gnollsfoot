@@ -436,7 +436,7 @@ class Overlay(ctk.CTkToplevel):
                         d["name"].configure(text=ab["name"][:18], text_color=col)
                         lo, hi = ab.get("lo"), ab.get("hi")
                         rng = "" if lo is None else ("  %d" % lo if lo == hi else "  %d-%d" % (lo, hi))
-                        _mark = {"proc": "  proc", "shield": "  DS"}.get(ab["kind"], "")
+                        _mark = {"proc": "  proc", "shield": "  DS", "pet": "  pet"}.get(ab["kind"], "")
                         d["rng"].configure(text=rng + _mark)
                         d["val"].configure(text="%d dps · %s" % (round(ab["dps"]),
                                                                       _short(ab["damage"])))
@@ -1491,6 +1491,9 @@ COL_PROC = "#9B8BD6"
 #: differently: a shield fires when something hits YOU, so it scales with how many things are
 #: on you rather than with how fast you swing.
 COL_SHIELD = "#5FB49C"
+#: Pets get their own colour too. "you + pet" in the header is only honest if the breakdown
+#: shows which part was the pet -- on a charm fight that can be most of the damage.
+COL_PET = "#C98B5E"
 COL_MELEE = GOLD
 COL_SPELL = "#6FA8DC"
 
@@ -1528,7 +1531,7 @@ def _short(n: int) -> str:
 
 def _ability_colour(kind: str) -> str:
     return {"proc": COL_PROC, "spell": COL_SPELL,
-            "shield": COL_SHIELD}.get(kind, COL_MELEE)
+            "shield": COL_SHIELD, "pet": COL_PET}.get(kind, COL_MELEE)
 
 
 def ability_breakdown(parent, row: dict) -> None:
@@ -1571,6 +1574,8 @@ def ability_breakdown(parent, row: dict) -> None:
         if a["kind"] == "proc" and a.get("ppm"):
             # Say it is per-fight: a proc rate off a 35-second fight is not the item's ppm.
             lab(left, f"  proc · {a['ppm']:.1f}/min this fight", F_SMALL, COL_PROC).pack(side="left")
+        elif a["kind"] == "pet":
+            lab(left, "  your pet", F_SMALL, COL_PET).pack(side="left")
         elif a["kind"] == "shield":
             # No rate: a shield fires on THEIR swings, not yours, so a per-minute figure
             # would measure how many mobs were beating on you.
