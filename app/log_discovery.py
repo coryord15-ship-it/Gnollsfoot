@@ -115,7 +115,14 @@ def inventory_files(config=None) -> list:
     found = {}
     for d in inventory_roots(config):
         try:
-            matches = glob.glob(os.path.join(d, "*-Inventory.txt"))
+            # 🔴 Currencies.txt TOO, and it is badly named. It is not just coin: wind runes,
+            # motes and every EXALTATION SLOT live in it, in the same tab-separated shape as
+            # the inventory dump. Reading only *-Inventory.txt made the journal blind to all
+            # of it -- a quest step needing a wind rune read as "missing" while the owner was
+            # carrying eleven, because runes are CURRENCY and never appear in the bag dump.
+            matches = (glob.glob(os.path.join(d, "*-Inventory.txt"))
+                       + glob.glob(os.path.join(d, "Currencies.txt"))
+                       + glob.glob(os.path.join(d, "*-Currencies.txt")))
         except OSError:
             continue
         for p in matches:

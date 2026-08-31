@@ -74,5 +74,51 @@ def parse_inventory(text: str) -> list[dict]:
         if item_id <= 0 or low in seen:
             continue
         seen.add(low)
-        items.append({"name": name, "id": item_id})
+        # Count and location were being thrown away. Both matter now that this also reads
+        # Currencies.txt: a quest wants "3 wind runes", not "a wind rune", and the location
+        # is what tells an exaltation apart from a bag item.
+        loc = parts[0].strip()
+        try:
+            count = int(parts[3].strip()) if len(parts) > 3 else 1
+        except ValueError:
+            count = 1
+        items.append({"name": name, "id": item_id,
+                      "count": max(1, count), "location": loc})
     return items
+
+
+def parse_exaltations(text: str) -> list[dict]:
+    """Which exaltation sits in which slot of which equipped item.
+
+    🔴 THIS IS THE FIVE-SLOT STRUCTURE THE CATALOGUE COULD NOT REPRESENT. Currencies.txt
+    states it outright, one row per slot:
+
+        Primary-Slot7   Idol of the Underking (Exaltation)   14762  1  10
+        Primary-Slot8   SoulFire (Exaltation)                 5504  1  10
+        Fingers-Slot7   Djarn's Amethyst Ring (Exaltation)   10366  1  10
+
+    That last one explains a long-standing puzzle: Djarn's Amethyst Ring procced 7,585 times
+    while being absent from items.json -- it is not worn, it is SLOTTED.
+
+    ⚠ Slot NUMBERS are not slot MEANINGS. The card shows Ornamentation / Focus / Click /
+    Worn / Proc, and which numeric slot maps to which is NOT stated in this file. Record the
+    number; do not invent the label.
+    """
+    out = []
+    for line in text.splitlines():
+        parts = line.split("	")
+        if len(parts) < 3:
+            continue
+        loc, name = parts[0].strip(), parts[1].strip()
+        if "(Exaltation)" not in name or "-Slot" not in loc:
+            continue
+        base, _, slot = loc.partition("-Slot")
+        try:
+            item_id = int(parts[2].strip())
+        except ValueError:
+            continue
+        out.append({"equipped_slot": base.strip(),
+                    "exalt_slot": slot.strip(),
+                    "name": name.replace("(Exaltation)", "").strip(),
+                    "id": item_id})
+    return out
