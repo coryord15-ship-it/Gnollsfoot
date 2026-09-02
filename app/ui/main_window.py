@@ -489,7 +489,7 @@ class MainWindow(ctk.CTk):
         # Sub-tab toggle — Quests and Achievements both live in "the journal".
         self._journal_subtab = "Quests"
         self._journal_seg = ctk.CTkSegmentedButton(
-            header, values=["Quests", "Achievements"],
+            header, values=["Quests", "Spell Quests", "Achievements"],
             command=self._show_journal_subtab,
             fg_color=theme.PANEL, selected_color=theme.PANEL_HOVER,
             selected_hover_color=theme.PANEL_HOVER, unselected_color=theme.PANEL,
@@ -513,24 +513,44 @@ class MainWindow(ctk.CTk):
         self._ach_scroll = ctk.CTkScrollableFrame(parent, fg_color=theme.BG)
         self._ach_widgets: list = []  # packed on demand by _show_journal_subtab
 
+        # Spell Quests — the quests that grant a SPELL. They were invisible before: the quests
+        # table held one, and spell acquisition otherwise lived in wiki_items as a scroll with
+        # no link back, so the journal answered "no spell quests for your class" no matter what.
+        self._spellq_scroll = ctk.CTkScrollableFrame(parent, fg_color=theme.BG)
+
     def _show_journal_subtab(self, name):
         """Toggle the journal body between the Quests and Achievements lists."""
         self._journal_subtab = name
+        for f in (self._journal_scroll, self._ach_scroll, self._spellq_scroll):
+            f.pack_forget()
         if name == "Achievements":
-            self._journal_scroll.pack_forget()
             self._ach_scroll.pack(fill="both", expand=True, padx=theme.PAD, pady=(0, theme.PAD))
             self._refresh_achievements()
+        elif name == "Spell Quests":
+            self._spellq_scroll.pack(fill="both", expand=True,
+                                     padx=theme.PAD, pady=(0, theme.PAD))
+            self._refresh_spell_quests()
         else:
-            self._ach_scroll.pack_forget()
             self._journal_scroll.pack(fill="both", expand=True, padx=theme.PAD, pady=(0, theme.PAD))
             self._refresh_journal()
 
     def _refresh_active_journal(self):
         """Refresh whichever journal sub-tab is currently showing."""
-        if getattr(self, "_journal_subtab", "Quests") == "Achievements":
+        cur = getattr(self, "_journal_subtab", "Quests")
+        if cur == "Achievements":
             self._refresh_achievements()
+        elif cur == "Spell Quests":
+            self._refresh_spell_quests()
         else:
             self._refresh_journal()
+
+    def _refresh_spell_quests(self):
+        """Spell Quests needs no login -- it is reference data, not your personal journal."""
+        try:
+            from app.ui import spell_quests
+            spell_quests.build(self._spellq_scroll, self._app)
+        except Exception:
+            log.exception("spell quests failed to build")
 
     def _refresh_journal(self):
         for w in getattr(self, "_journal_widgets", []):

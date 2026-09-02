@@ -51,7 +51,7 @@ def _known(app):
     if _CACHE["known"] is None:
         cfg = getattr(app, "config", None) or getattr(app, "settings", None)
         try:
-            _CACHE["known"] = spellbook.spellbook_files(cfg)
+            _CACHE["known"] = spellbook.known_spells(cfg)
         except Exception:
             log.exception("could not read spellbook dumps")
             _CACHE["known"] = {}
@@ -281,9 +281,11 @@ def tab_quickbuff(tab, app):
         # this the tool cannot be trusted: the spell FILE lists every spell EverQuest has ever
         # had, and recommending one the player has no way to get is worse than recommending
         # nothing. This is how "Austerity" (a level-55 buff, on a level-50 server) got offered.
+        # The dump is character-wide, so verification is all-or-nothing: either we have this
+        # character's spellbook or we do not. It is not per class.
         picked = [c for c, _ in picks]
-        verified = [c for c in picked if c in known]
-        guessed = [c for c in picked if c not in known]
+        verified = picked if known else []
+        guessed = [] if known else picked
         if verified:
             lab(head2, "· %s from your spellbook" % "/".join(verified),
                 F_SMALL, GOLD).pack(side="left", padx=(8, 0))

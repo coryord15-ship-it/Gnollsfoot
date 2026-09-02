@@ -176,8 +176,30 @@ def spell_file(config=None) -> str:
     return os.path.join(_EQ_DEFAULT, "spells_us.txt")
 
 
+def known_spells(config=None) -> set:
+    """Every spell this CHARACTER knows, across all their equipped classes.
+
+    🔴 THE DUMP IS CHARACTER-WIDE, NOT CLASS-WIDE. The filename carries a class
+    (`<char>-PAL-Spellbook.txt`) and that is misleading: Legends is multiclass, so the file
+    holds the spells of every class the character has equipped. The owner's "PAL" book is 752
+    spells, of which 142 are ENCHANTER-ONLY and 11 are paladin-only.
+
+    Keying it by the filename's class -- which `spellbook_files()` does -- therefore reports
+    an enchanter as having no spellbook at all, and a multiclass character's book gets filed
+    under one third of itself. Use THIS for "do I know that spell"; use `spellbook_files()`
+    only when you genuinely want the per-file split.
+    """
+    out = set()
+    for names in spellbook_files(config).values():
+        out |= names
+    return out
+
+
 def spellbook_files(config=None) -> dict:
-    """The character's OWN spellbook dumps: {CLASS: {spell names}}.
+    """Raw per-FILE spellbook dumps: {class-in-filename: {spell names}}.
+
+    ⚠ The class in the key is the class in the FILENAME, not the class that can cast each
+    spell -- see `known_spells()`. Prefer that unless you specifically need the per-file view.
 
     🔴 THIS IS THE GROUND TRUTH and it beats anything derived from `spells_us.txt`. The client
     writes `<char>-<CLASS>-Spellbook.txt` (one `level<TAB>name` per line) listing what that
@@ -367,8 +389,9 @@ def castable_buffs(spells: list, picks: list, min_ticks: int = MIN_BUFF_TICKS,
             need = s.classes.get(ab)
             if need is None or need > min(lvl, LEVEL_CAP):
                 continue
-            book = known.get(ab)
-            if book is not None and s.name.lower() not in book:
+            # Character-wide, not per-class: a multiclass character's dump is filed under one
+            # class name but contains every class they have equipped.
+            if known and s.name.lower() not in known:
                 continue                       # the character does not have this spell
             if s.ticks(lvl) < min_ticks:      # a heal-over-time, not a buff (permanent passes)
                 continue
@@ -456,9 +479,24 @@ MAX_SLOTS = 12
 
 
 def slots_used(sp) -> set:
-    """The (slot, effect) pairs one spell occupies. Only real stats count."""
-    return {(e["slot"], e["spa"]) for e in sp.effects
-            if e["spa"] in SCORED_SPAS and (e["max"] or e["base"])}
+    """Every (slot, effect) pair this spell OCCUPIES — scored or not.
+
+    🔴 OCCUPYING A SLOT AND BEING WORTH POINTS ARE DIFFERENT QUESTIONS, and conflating them
+    was a real bug. This filtered to SCORED_SPAS, so an effect excluded from scoring became
+    invisible to stacking — and every shapeshift carries SPA 58 (illusion) in slot 1:
+
+        Wolf Form         slot 1 spa 58 model 796
+        Form of the Bear  slot 1 spa 58 model 43
+
+    Both occupy slot 1 and cannot both be up, but the planner happily stacked them. Owner,
+    2026-09-01: *"theres a few buffs you are stacking that wouldnt actuall work because they
+    are also an illusion like wolf form and form of the bear"*.
+
+    SPA 58 is still excluded from VALUE (its number is a character model id, not a magnitude)
+    and vision/runes/heals still earn no gem — they just block correctly now. The SPA-10
+    padding slots never reach here; they are dropped at parse.
+    """
+    return {(e["slot"], e["spa"]) for e in sp.effects if (e["max"] or e["base"])}
 
 
 def slot_map(chosen: list) -> dict:
