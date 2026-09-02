@@ -16,7 +16,8 @@ import logging
 
 import customtkinter as ctk
 
-from app.ui import datapaths, dps_test, extra_views, history_load, theme
+from app.ui import (datapaths, dps_test, extra_views, history_load, quickbuff_view,
+                    theme)
 
 log = logging.getLogger(__name__)
 
@@ -218,7 +219,8 @@ class PortedSection(ctk.CTkFrame):
     # which is exactly what the first smoke test showed: 9 widgets for 80 loot events.
     _ATTR = {"Combat": "redraw_combat", "Healing": "redraw_healing", "Loot": "redraw_loot",
              "Motes": "redraw_farm",
-             "Gear": "redraw_gear", "Codex": "redraw_codex", "DPS Test": "redraw_dps_test"}
+             "Gear": "redraw_gear", "Codex": "redraw_codex", "DPS Test": "redraw_dps_test",
+             "Quick Buff": "redraw_quickbuff"}
 
     def _rebuild(self, name):
         tab = self.tabs.tab(name)
@@ -327,7 +329,10 @@ class ToolsSection(PortedSection):
             builders={"Loot": extra_views.tab_loot,
                       "Motes": extra_views.tab_farm,
                       "Gear": extra_views.tab_gear,
-                      "Codex": extra_views.tab_codex},
+                      "Codex": extra_views.tab_codex,
+                      # Which buffs to load in your gems for the Quick Buff AA. Reads the
+                      # game's own spells_us.txt; see app/parsers/spellbook.py.
+                      "Quick Buff": quickbuff_view.tab_quickbuff},
             show_classes=True, show_overlay=False)
 
 
