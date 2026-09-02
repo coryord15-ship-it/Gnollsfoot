@@ -28,6 +28,18 @@ jobs:
           pip install -r requirements.txt
           pip install pyinstaller
 
+      # build_data/ is gitignored (this repo is public), so a CI checkout has none -- which
+      # meant NO shipped release ever contained the item/mob/exaltation snapshots and every
+      # new user got "Reference data not found" on Gear and Codex. Verified absent in the live
+      # 1.5.31 binary. Pulling them here also means each build ships CURRENT data instead of
+      # whatever happened to be on the maintainer's disk.
+      #
+      # No secret needed: it reads with the PUBLISHABLE key that is already hardcoded in
+      # app/main.py and ships inside every binary. The script refuses a service_role key, and
+      # fails the build if a snapshot comes back nearly empty rather than shipping a lie.
+      - name: Fetch reference snapshots
+        run: python tools/build_snapshots.py
+
       - name: Build GnollGuard.exe
         run: pyinstaller GnollGuard.spec --clean --noconfirm
 
