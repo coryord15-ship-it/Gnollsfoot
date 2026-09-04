@@ -152,9 +152,38 @@ def evaluate(quests, bag, my_classes=None) -> list:
     return out
 
 
+def add_to_journal(app, rows) -> int:
+    """Put every matched quest into the journal. -> how many were newly added.
+
+    Only quests we actually hold an item for, which `evaluate` has already filtered to. Uses
+    the existing `add_quest` upsert, so re-pressing the button is harmless -- an upsert on a
+    quest already tracked changes nothing and is not counted.
+    """
+    sup = getattr(app, "supabase", None)
+    if sup is None or not getattr(getattr(app, "auth", None), "is_logged_in", False):
+        return 0                      # not signed in: nothing to add to
+    try:
+        # get_journal() returns the quest rows themselves, so the id is `id`, not `quest_id`.
+        have = {q.get("id") for q in (sup.get_journal() or [])}
+    except Exception:
+        log.exception("could not read the journal; adding without a duplicate check")
+        have = set()
+    added = 0
+    for r in rows:
+        qid = (r.get("quest") or {}).get("id")
+        if qid is None or qid in have:
+            continue
+        try:
+            if sup.add_quest(qid):
+                added += 1
+        except Exception:
+            log.exception("could not add quest %s to the journal", qid)
+    return added
+
+
 # ── UI ────────────────────────────────────────────────────────────────────────────────────
 
-def render(body, rows, path, n_items) -> None:
+def render(body, rows, path, n_items, added=0) -> None:
     """Draw the results. Separate from the fetch so it can be tested without threading."""
     for w in body.winfo_children():
         w.destroy()
@@ -173,7 +202,10 @@ def render(body, rows, path, n_items) -> None:
         READY if ready else T3).pack(fill="x", padx=12, pady=(10, 2))
     wrap(head, "%d partly done · %d items read from %s"
                % (len(rows) - len(ready), n_items, os.path.basename(path)),
-         T3).pack(fill="x", padx=12, pady=(0, 10))
+         T3).pack(fill="x", padx=12, pady=(0, 2))
+    lab(head, ("added %d new quest%s to your journal" % (added, "" if added == 1 else "s"))
+              if added else "nothing new to add — these are already in your journal",
+        F_SMALL, GOLD if added else T3).pack(fill="x", padx=12, pady=(0, 10))
 
     if not rows:
         wrap(body, "Nothing in your bags matches a quest we have turn-in items recorded for. "
@@ -228,9 +260,10 @@ def build(parent, app) -> None:
     head.pack(fill="x", pady=(0, 6))
     lab(head, "BAG CHECK", F_SMALL, GOLD).pack(fill="x", padx=12, pady=(10, 2))
     wrap(head, "Load your bags with anything you might be carrying for a quest, then type  "
-               "/outputfile inventory  in game and press the button. Every quest you already "
-               "hold turn-in items for is listed, and the ones you can finish right now are "
-               "green. The file is read off your own disk — nothing is sent anywhere.",
+               "/outputfile inventory  in game and press the button. Every quest you hold "
+               "turn-in items for is ADDED TO YOUR JOURNAL, and the ones you can finish right "
+               "now are green. Works for any quest we have turn-in items recorded for, not "
+               "just Plane of Sky. The file is read off your own disk — nothing is sent.",
          T2).pack(fill="x", padx=12, pady=(0, 8))
 
     body = ctk.CTkFrame(parent, fg_color="transparent")
@@ -242,16 +275,21 @@ def build(parent, app) -> None:
         lab(body, "Reading your inventory…", F_BODY, T3).pack(padx=12, pady=14)
 
         def work():
+            added = 0
             try:
                 bag, path, n = carried()
                 rows = evaluate(fetch_quests(app), bag) if bag else []
+                # 🔴 THE POINT OF THE BUTTON. Owner, 2026-09-04: *"all i asked you to do was
+                # look at the items find the quest the items belong to add them to journal"*.
+                # The first cut only DISPLAYED matches, which is not what was asked for.
+                added = add_to_journal(app, rows)
             except Exception:
                 log.exception("bag check failed")
                 bag, path, n, rows = set(), None, 0, []
 
             def paint():
                 try:
-                    render(body, rows, path, n)
+                    render(body, rows, path, n, added)
                 except Exception:
                     # Never swallow this. A render fault presenting as "nothing matched" is
                     # indistinguishable from genuinely having nothing -- the exact trap the
