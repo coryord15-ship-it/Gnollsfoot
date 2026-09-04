@@ -489,7 +489,7 @@ class MainWindow(ctk.CTk):
         # Sub-tab toggle — Quests and Achievements both live in "the journal".
         self._journal_subtab = "Quests"
         self._journal_seg = ctk.CTkSegmentedButton(
-            header, values=["Quests", "Spell Quests", "Achievements"],
+            header, values=["Quests", "Spell Quests", "Bag Check", "Achievements"],
             command=self._show_journal_subtab,
             fg_color=theme.PANEL, selected_color=theme.PANEL_HOVER,
             selected_hover_color=theme.PANEL_HOVER, unselected_color=theme.PANEL,
@@ -518,10 +518,16 @@ class MainWindow(ctk.CTk):
         # no link back, so the journal answered "no spell quests for your class" no matter what.
         self._spellq_scroll = ctk.CTkScrollableFrame(parent, fg_color=theme.BG)
 
+        # Bag Check -- reads the player's own `/outputfile inventory` dump and says which
+        # quests they can hand in right now. Sky class tests want a Wind Rune plus two or
+        # three drops, and people carry a bag of them with no idea what completes anything.
+        self._bag_scroll = ctk.CTkScrollableFrame(parent, fg_color=theme.BG)
+
     def _show_journal_subtab(self, name):
         """Toggle the journal body between the Quests and Achievements lists."""
         self._journal_subtab = name
-        for f in (self._journal_scroll, self._ach_scroll, self._spellq_scroll):
+        for f in (self._journal_scroll, self._ach_scroll, self._spellq_scroll,
+                  self._bag_scroll):
             f.pack_forget()
         if name == "Achievements":
             self._ach_scroll.pack(fill="both", expand=True, padx=theme.PAD, pady=(0, theme.PAD))
@@ -530,6 +536,10 @@ class MainWindow(ctk.CTk):
             self._spellq_scroll.pack(fill="both", expand=True,
                                      padx=theme.PAD, pady=(0, theme.PAD))
             self._refresh_spell_quests()
+        elif name == "Bag Check":
+            self._bag_scroll.pack(fill="both", expand=True,
+                                  padx=theme.PAD, pady=(0, theme.PAD))
+            self._refresh_bag_check()
         else:
             self._journal_scroll.pack(fill="both", expand=True, padx=theme.PAD, pady=(0, theme.PAD))
             self._refresh_journal()
@@ -541,6 +551,8 @@ class MainWindow(ctk.CTk):
             self._refresh_achievements()
         elif cur == "Spell Quests":
             self._refresh_spell_quests()
+        elif cur == "Bag Check":
+            self._refresh_bag_check()
         else:
             self._refresh_journal()
 
@@ -551,6 +563,14 @@ class MainWindow(ctk.CTk):
             spell_quests.build(self._spellq_scroll, self._app)
         except Exception:
             log.exception("spell quests failed to build")
+
+    def _refresh_bag_check(self):
+        """Bag Check needs no login -- it reads reference data and the player's own dump."""
+        try:
+            from app.ui import bag_check
+            bag_check.build(self._bag_scroll, self._app)
+        except Exception:
+            log.exception("bag check failed to build")
 
     def _refresh_journal(self):
         for w in getattr(self, "_journal_widgets", []):
