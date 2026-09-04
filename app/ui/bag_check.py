@@ -113,12 +113,15 @@ def fetch_quests(app) -> list:
 def evaluate(quests, bag, my_classes=None) -> list:
     """-> [{quest, have, missing, ready, npc, mine}] for every quest we hold ANY item for.
 
-    🔴 CLASS MATTERS OR THE GREEN LIES. The Sky class tests all want a Wind Rune plus a couple
-    of drops, and the drops overlap heavily between classes -- so a PAL/MNK/ENC character
-    carrying Sky loot comes out "ready" for Bard and Berserker tests he can never hand in.
-    Testing this against the owner's real bags produced exactly that: 30 ready, most of them
-    other classes'. A quest for a class you do not play is still listed (you may be holding
-    the items for a friend) but is never marked ready and never sorted first."""
+    🔴 DO NOT GATE "READY" ON CLASS. I did, and it was wrong: the owner, 2026-09-04 --
+    *"i didnt ask you to filter it by class... the sky quests are also how we unlock other
+    classes as primary classes."* Legends characters equip up to THREE classes, and the Plane
+    of Sky class tests are the mechanism that flags a new one. So a Bard test is not useless to
+    a PAL/MNK/ENC character -- completing it is how Bard becomes available. Filtering on the
+    classes you already play hides precisely the quests worth doing.
+
+    The class is still shown, because it tells you what the test unlocks. It is not a filter,
+    and it never downgrades a completed set."""
     mine = {c for c in (my_classes if my_classes is not None else EV.MY_CLASSES) if c}
     out = []
     for q in quests:
@@ -139,11 +142,12 @@ def evaluate(quests, bag, my_classes=None) -> list:
             continue
         missing = sorted(o for f, o in folded.items() if f not in bag)
         cls = (q.get("char_class") or "").strip()
-        # No class recorded = not class-locked, so it counts as yours.
+        # `mine` is INFORMATION ONLY -- used to sort your current classes first, never to
+        # decide readiness. A test for a class you do not play yet is how you unlock it.
         is_mine = (not cls) or CLASS_ABBR.get(cls, cls.upper()[:3]) in mine
         out.append({"quest": q, "have": have, "missing": missing,
-                    "ready": (not missing) and is_mine, "mine": is_mine, "npc": npc})
-    out.sort(key=lambda r: (not r["ready"], not r["mine"], len(r["missing"]),
+                    "ready": not missing, "mine": is_mine, "npc": npc})
+    out.sort(key=lambda r: (not r["ready"], len(r["missing"]), not r["mine"],
                             (r["quest"].get("quest_name") or "").lower()))
     return out
 
@@ -189,9 +193,6 @@ def render(body, rows, path, n_items) -> None:
             side="left")
         if r["ready"]:
             tag, col = "READY", READY
-        elif not r.get("mine", True) and not r["missing"]:
-            # Has every item but cannot hand it in. Say so rather than showing green.
-            tag, col = "NOT YOUR CLASS", T3
         else:
             tag, col = "%d missing" % len(r["missing"]), T3
         lab(top, tag, F_SMALL, col).pack(side="right")
@@ -203,7 +204,10 @@ def render(body, rows, path, n_items) -> None:
         if who:
             bits.append("turn in to %s" % who)
         if q.get("char_class"):
-            bits.append(q["char_class"])
+            # Sky class tests are the multiclass unlock, so name what it opens up rather
+            # than treating the class as a restriction.
+            bits.append(q["char_class"] if r.get("mine", True)
+                        else "unlocks %s" % q["char_class"])
         if bits:
             lab(box, " · ".join(bits), F_SMALL, T3).pack(fill="x", padx=12)
 
